@@ -1,1 +1,0 @@
-// Final App component with Supabase logic here
