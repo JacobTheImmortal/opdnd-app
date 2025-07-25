@@ -1,8 +1,8 @@
 export default function App() {
   return (
-    <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: '2rem' }}>
       <h1>✅ OPDND IS ALIVE</h1>
-      <p>If you see this, React + Vite + Vercel are working correctly.</p>
+      <p>This confirms React is rendering your code.</p>
     </div>
   );
 }
