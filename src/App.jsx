@@ -1,8 +1,9 @@
 export default function App() {
   return (
-    <div style={{ padding: '2rem' }}>
-      <h1>OPDND is Alive</h1>
-      <p>This is your app's main screen!</p>
+    <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
+      <h1>✅ OPDND IS ALIVE</h1>
+      <p>If you see this message, React + Vite + Vercel are working.</p>
+      <p>The next step is to inject real character sheet logic.</p>
     </div>
   );
 }
