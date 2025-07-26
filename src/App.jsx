@@ -3,6 +3,7 @@ import { races } from './races';
 import { devilFruits } from './devilFruits';
 import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
 import { calculateMaxBar, spendBar, gainBar } from './barUtils';
+import { defaultActions } from './actionsUtils';
 
 export default function App() {
   const [step, setStep] = useState(1);
@@ -12,6 +13,10 @@ export default function App() {
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
+  const [actionPoints, setActionPoints] = useState(3);
+  const [customActions, setCustomActions] = useState([]);
+  const [newActionName, setNewActionName] = useState('');
+  const [newActionBarCost, setNewActionBarCost] = useState(0);
 
   const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
@@ -62,6 +67,7 @@ export default function App() {
     };
     setCharList((prev) => [...prev, char]);
     setCurrentChar(char);
+    setActionPoints(3);
     setStep(4);
   };
 
@@ -69,6 +75,7 @@ export default function App() {
     const pass = prompt('Enter 4-digit passcode');
     if (pass === char.passcode) {
       setCurrentChar(char);
+      setActionPoints(3);
       setStep(4);
     } else {
       alert('Incorrect passcode');
@@ -97,6 +104,7 @@ export default function App() {
     updated.currentHp = derived.hp;
     updated.currentBar = derived.bar;
     setCurrentChar(updated);
+    setActionPoints(3);
   };
 
   if (step === 2) {
@@ -117,7 +125,7 @@ export default function App() {
   if (step === 4 && currentChar) {
     return (
       <div style={{ padding: '1rem' }}>
-        <button onClick={() => setStep(1)}>← Back</button>
+        <button onClick={() => setStep(1)}>â† Back</button>
         <h2>{currentChar.name} (Level {currentChar.level})</h2>
         <p><strong>Race:</strong> {currentChar.race}</p>
         <p><strong>Devil Fruit:</strong> {currentChar.fruit?.name || 'None'}</p>
@@ -139,7 +147,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Main Sheet */}
         {screen === 'Main' && (
           <>
             <h3>Main Stats</h3>
@@ -148,9 +155,7 @@ export default function App() {
                 <li key={k}>
                   {k.toUpperCase()}: {v}
                   {currentChar.sp > 0 && (
-                    <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>
-                      +
-                    </button>
+                    <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
                   )}
                 </li>
               ))}
@@ -159,13 +164,7 @@ export default function App() {
 
             <h4>Health Management</h4>
             <p>Current HP: {currentChar.currentHp} / {currentChar.hp}</p>
-            <input
-              type="number"
-              value={damageAmount}
-              onChange={(e) => setDamageAmount(Number(e.target.value))}
-              placeholder="Amount"
-              style={{ width: '60px' }}
-            />
+            <input type="number" value={damageAmount} onChange={e => setDamageAmount(Number(e.target.value))} placeholder="Amount" style={{ width: '60px' }} />
             <button onClick={() => {
               const updated = { ...currentChar };
               updated.currentHp = applyDamage(updated.currentHp, damageAmount);
@@ -179,32 +178,44 @@ export default function App() {
           </>
         )}
 
-        {/* Actions Sheet */}
         {screen === 'Actions' && (
           <>
             <h3>Actions</h3>
-            <p>Use Bar to perform actions</p>
-            <input
-              type="number"
-              value={barAmount}
-              onChange={(e) => setBarAmount(Number(e.target.value))}
-              placeholder="Bar Cost"
-              style={{ width: '60px' }}
-            />
+            <p>Action Points: {actionPoints}</p>
+            <button onClick={() => setActionPoints(3)}>Take Turn</button>
+
+            {[...defaultActions, ...customActions].map((action, i) => (
+              <div key={i} style={{ marginTop: '0.5rem' }}>
+                <strong>{action.name}</strong> â€“ {action.barCost} Bar
+                <button onClick={() => {
+                  if (actionPoints <= 0) {
+                    alert("No Action Points left!");
+                    return;
+                  }
+                  if (currentChar.currentBar < action.barCost) {
+                    alert("Not enough Bar!");
+                    return;
+                  }
+                  const updated = { ...currentChar };
+                  updated.currentBar -= action.barCost;
+                  setCurrentChar(updated);
+                  setActionPoints(prev => prev - 1);
+                }} style={{ marginLeft: '1rem' }}>Use</button>
+              </div>
+            ))}
+
+            <h4 style={{ marginTop: '1rem' }}>Add Custom Action</h4>
+            <input placeholder="Action Name" value={newActionName} onChange={e => setNewActionName(e.target.value)} style={{ marginRight: '0.5rem' }} />
+            <input type="number" placeholder="Bar Cost" value={newActionBarCost} onChange={e => setNewActionBarCost(Number(e.target.value))} style={{ width: '60px', marginRight: '0.5rem' }} />
             <button onClick={() => {
-              const updated = { ...currentChar };
-              updated.currentBar = spendBar(updated.currentBar, barAmount);
-              setCurrentChar(updated);
-            }}>Use Bar</button>
-            <button onClick={() => {
-              const updated = { ...currentChar };
-              updated.currentBar = gainBar(updated.currentBar, updated.bar, barAmount);
-              setCurrentChar(updated);
-            }} style={{ marginLeft: '0.5rem' }}>Restore Bar</button>
+              if (!newActionName) return;
+              setCustomActions(prev => [...prev, { name: newActionName, barCost: newActionBarCost }]);
+              setNewActionName('');
+              setNewActionBarCost(0);
+            }}>Add</button>
           </>
         )}
 
-        {/* Equipment Sheet */}
         {screen === 'Equipment' && (
           <>
             <h3>Equipment</h3>
@@ -230,11 +241,7 @@ export default function App() {
       <h2 style={{ marginTop: '2rem' }}>Characters</h2>
       <ul>
         {charList.map((char, i) => (
-          <li key={i}>
-            <button onClick={() => enterChar(char)}>
-              {char.name} ({char.race})
-            </button>
-          </li>
+          <li key={i}><button onClick={() => enterChar(char)}>{char.name} ({char.race})</button></li>
         ))}
       </ul>
     </div>
