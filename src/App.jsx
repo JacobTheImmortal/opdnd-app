@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
+import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
+
+
+
 
 export default function App() {
   const [step, setStep] = useState(1);
@@ -11,12 +15,14 @@ export default function App() {
 
   const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
-  const calculateDerived = (stats, level = 1, base = {}) => {
-    const hp = (base.hp || 20) + level * 2;
-    const bar = (base.bar || 100) + level * 5;
-    const reflex = (base.reflex || 5) + Math.floor(stats.dex / 5) + Math.floor(level / 3);
-    return { hp, bar, reflex };
-  };
+  const calculateDerived = (stats, level = 1, race = {}) => {
+  const baseHP = race.hp || 20;
+  const con = stats.con || 10;
+  const hp = calculateMaxHealth(baseHP, con, level);
+  const bar = (race.bar || 100) + level * 5;
+  const reflex = (race.reflex || 5) + Math.floor(stats.dex / 5) + Math.floor(level / 3);
+  return { hp, bar, reflex };
+};
 
   const startCreation = (e) => {
     e.preventDefault();
@@ -125,6 +131,26 @@ if (step === 2) {
             </ul>
             <p>Skill Points: {currentChar.sp}</p>
           </>
+           <h4>Health Management</h4>
+<p>Current HP: {currentChar.currentHp} / {currentChar.hp}</p>
+<input
+  type="number"
+  placeholder="Amount"
+  value={damageAmount}
+  onChange={(e) => setDamageAmount(Number(e.target.value))}
+  style={{ width: '60px' }}
+/>
+<button onClick={() => {
+  const updated = { ...currentChar };
+  updated.currentHp = applyDamage(updated.currentHp, damageAmount);
+  setCurrentChar(updated);
+}}>Take Damage</button>
+
+<button onClick={() => {
+  const updated = { ...currentChar };
+  updated.currentHp = applyHeal(updated.currentHp, updated.hp, damageAmount);
+  setCurrentChar(updated);
+}}>Heal</button>
         )}
         {activeTab === "Actions" && (
           <div>
