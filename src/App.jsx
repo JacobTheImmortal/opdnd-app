@@ -1,110 +1,249 @@
 import React, { useState } from 'react';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
+import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
+import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
+
 import EquipmentSheet from './EquipmentSheet';
 
 export default function App() {
-  const [screen, setScreen] = useState('home');
-  const [characters, setCharacters] = useState([]);
-  const [selectedCharacterIndex, setSelectedCharacterIndex] = useState(null);
-  const [creatingCharacter, setCreatingCharacter] = useState(false);
-  const [newChar, setNewChar] = useState({ name: '', passcode: '', withFruit: false });
-  const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
-
+  const [step, setStep] = useState(1);
+  const [charList, setCharList] = useState([]);
+  const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
-  const [skillPoints, setSkillPoints] = useState(0);
+  const [screen, setScreen] = useState('Main');
+  const [damageAmount, setDamageAmount] = useState(0);
+  const [barAmount, setBarAmount] = useState(0);
   const [actionPoints, setActionPoints] = useState(3);
   const [customActions, setCustomActions] = useState([]);
+const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
+  const [newActionName, setNewActionName] = useState('');
+  const [newActionBarCost, setNewActionBarCost] = useState(0);
 
-  const modifier = (stat) => Math.floor((stat - 10) / 2);
-  const meleeText = () => `1d6 + ${modifier(currentChar.str || 10)}`;
+  const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+
+  const calculateDerived = (stats, level = 1, race = {}) => {
+    const baseHP = race.hp || 20;
+    const baseBar = race.bar || 100;
+    const con = stats.con || 10;
+    const int = stats.int || 10;
+    const wis = stats.wis || 10;
+    const hp = calculateMaxHealth(baseHP, con, level);
+    const bar = calculateMaxBar(baseBar, int, wis, level);
+    const reflex = (race.reflex || 5) + Math.floor(stats.dex / 5) + Math.floor(level / 3);
+    return { hp, bar, reflex };
+  };
+
+  const startCreation = (e) => {
+    e.preventDefault();
+    const { name, fruit, passcode } = {
+      name: e.target.name.value,
+      fruit: e.target.fruit.checked,
+      passcode: e.target.passcode.value,
+    };
+    if (name && passcode.length === 4) {
+      setNewChar({ name, passcode, fruit });
+      setStep(2);
+    } else {
+      alert('Enter a name and a 4-digit passcode');
+    }
+  };
+
+  const chooseRace = (raceKey) => {
+    const race = races[raceKey];
+    const stats = { ...initStats };
+    Object.entries(race.bonuses || {}).forEach(([k, v]) => (stats[k] += v));
+    const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
+    const level = 1;
+    const derived = calculateDerived(stats, level, race);
+    const char = {
+      ...newChar,
+      race: raceKey,
+      stats,
+      level,
+      sp: race.sp,
+      ...derived,
+      fruit,
+      currentHp: derived.hp,
+      currentBar: derived.bar,
+    };
+    setCharList((prev) => [...prev, char]);
+    setCurrentChar(char);
+    setActionPoints(3);
+    setStep(4);
+  };
+
+  const enterChar = (char) => {
+    const pass = prompt('Enter 4-digit passcode');
+    if (pass === char.passcode) {
+      setCurrentChar(char);
+      setActionPoints(3);
+      setStep(4);
+    } else {
+      alert('Incorrect passcode');
+    }
+  };
+
+  const increaseStat = (stat) => {
+    if (currentChar.sp > 0) {
+      const updated = { ...currentChar };
+      updated.stats[stat]++;
+      updated.sp--;
+      const derived = calculateDerived(updated.stats, updated.level, races[updated.race]);
+      Object.assign(updated, derived);
+      updated.currentHp = Math.min(updated.currentHp, derived.hp);
+      updated.currentBar = Math.min(updated.currentBar, derived.bar);
+      setCurrentChar(updated);
+    }
+  };
 
   const levelUp = () => {
     const updated = { ...currentChar };
-    updated.level += 1;
-    updated.maxHp += Math.floor(updated.maxHp * 0.25) + modifier(updated.con);
-    updated.hp = updated.maxHp;
-    updated.maxBar += 10 + modifier(updated.int) + modifier(updated.wis);
-    updated.currentBar = updated.maxBar;
-    updated.reflex += 1;
-    setSkillPoints(prev => prev + 3);
+    updated.level++;
+    updated.sp += 3;
+    const derived = calculateDerived(updated.stats, updated.level, races[updated.race]);
+    Object.assign(updated, derived);
+    updated.currentHp = derived.hp;
+    updated.currentBar = derived.bar;
+    setCurrentChar(updated);
     setActionPoints(3);
-    setCurrentChar(updated);
   };
 
-  const updateStat = (stat) => {
-    if (skillPoints <= 0) return;
-    const updated = { ...currentChar };
-    updated[stat] += 1;
-    setSkillPoints(prev => prev - 1);
-    setCurrentChar(updated);
-  };
+  if (step === 2) {
+    return (
+      <div style={{ padding: '1rem' }}>
+        <h2>Choose a Race</h2>
+        {Object.entries(races).map(([name, data]) => (
+          <div key={name} style={{ marginBottom: '1rem', borderBottom: '1px solid #ddd' }}>
+            <h3>{name}</h3>
+            <p>{data.description}</p>
+            <button onClick={() => chooseRace(name)}>Choose {name}</button>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
-  const takeDamage = (amount) => {
-    const updated = { ...currentChar };
-    updated.hp = Math.max(0, updated.hp - amount);
-    setCurrentChar(updated);
-  };
+  if (step === 4 && currentChar) {
+    return (
+      <div style={{ padding: '1rem' }}>
+        <button onClick={() => setStep(1)}>← Back</button>
+        <h2>{currentChar.name} (Level {currentChar.level})</h2>
+        <p><strong>Race:</strong> {currentChar.race}</p>
+        <p><strong>Devil Fruit:</strong> {currentChar.fruit?.name || 'None'}</p>
+        {currentChar.fruit && <p><em>{currentChar.fruit.ability}</em></p>}
 
-  const heal = (amount) => {
-    const updated = { ...currentChar };
-    updated.hp = Math.min(updated.maxHp, updated.hp + amount);
-    setCurrentChar(updated);
-  };
+        <p>
+          <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} |
+          <strong> Bar:</strong> {currentChar.currentBar} / {currentChar.bar} |
+          <strong> Reflex:</strong> {currentChar.reflex}
+        </p>
 
-  const reduceBar = (amount) => {
-    const updated = { ...currentChar };
-    updated.currentBar = Math.max(0, updated.currentBar - amount);
-    setCurrentChar(updated);
-  };
+        <button onClick={levelUp}>Level Up (+3 SP & full restore)</button>
 
-  const restoreBar = (amount) => {
-    const updated = { ...currentChar };
-    updated.currentBar = Math.min(updated.maxBar, updated.currentBar + amount);
-    setCurrentChar(updated);
-  };
+        <div style={{ marginTop: '1rem' }}>
+          {['Main', 'Actions', 'Equipment'].map((tab) => (
+            <button key={tab} onClick={() => setScreen(tab)} style={{ marginRight: '0.5rem' }}>
+              {tab}
+            </button>
+          ))}
+        </div>
 
-  // ... All other functions like chooseRace, checkPasscode, etc. remain unchanged
+        {screen === 'Main' && (
+          <>
+            <h3>Main Stats</h3>
+            <ul>
+              {Object.entries(currentChar.stats).map(([k, v]) => (
+                <li key={k}>
+                  {k.toUpperCase()}: {v}
+                  {currentChar.sp > 0 && (
+                    <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p>Skill Points: {currentChar.sp}</p>
+
+            <h4>Health Management</h4>
+            <p>Current HP: {currentChar.currentHp} / {currentChar.hp}</p>
+            <input type="number" value={damageAmount} onChange={e => setDamageAmount(Number(e.target.value))} placeholder="Amount" style={{ width: '60px' }} />
+            <button onClick={() => {
+              const updated = { ...currentChar };
+              updated.currentHp = applyDamage(updated.currentHp, damageAmount);
+              setCurrentChar(updated);
+            }}>Take Damage</button>
+            <button onClick={() => {
+              const updated = { ...currentChar };
+              updated.currentHp = applyHeal(updated.currentHp, updated.hp, damageAmount);
+              setCurrentChar(updated);
+            }} style={{ marginLeft: '0.5rem' }}>Heal</button>
+          </>
+        )}
+
+        {screen === 'Actions' && (
+          <>
+            <h3>Actions</h3>
+            <p>Action Points: {actionPoints}</p>
+            <button onClick={() => setActionPoints(3)}>Take Turn</button>
+
+            {[...defaultActions, ...customActions].map((action, i) => (
+              <div key={i} style={{ marginTop: '0.5rem' }}>
+                <strong>{action.name}</strong> – {action.barCost} Bar
+                <button onClick={() => {
+                  if (actionPoints <= 0) {
+                    alert("No Action Points left!");
+                    return;
+                  }
+                  if (currentChar.currentBar < action.barCost) {
+                    alert("Not enough Bar!");
+                    return;
+                  }
+                  const updated = { ...currentChar };
+                  updated.currentBar -= action.barCost;
+                  setCurrentChar(updated);
+                  setActionPoints(prev => prev - 1);
+                }} style={{ marginLeft: '1rem' }}>Use</button>
+              </div>
+            ))}
+
+            <h4 style={{ marginTop: '1rem' }}>Add Custom Action</h4>
+            <input placeholder="Action Name" value={newActionName} onChange={e => setNewActionName(e.target.value)} style={{ marginRight: '0.5rem' }} />
+            <input type="number" placeholder="Bar Cost" value={newActionBarCost} onChange={e => setNewActionBarCost(Number(e.target.value))} style={{ width: '60px', marginRight: '0.5rem' }} />
+            <button onClick={() => {
+              if (!newActionName) return;
+              setCustomActions(prev => [...prev, { name: newActionName, barCost: newActionBarCost }]);
+              setNewActionName('');
+              setNewActionBarCost(0);
+            }}>Add</button>
+          </>
+        )}
+
+        {screen === 'Equipment' && (
+          <EquipmentSheet equipment={equipment} setEquipment={setEquipment} />
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <h1>OP DND</h1>
-
-      {screen === 'Main' && currentChar && (
-        <>
-          <h2>{currentChar.name} (Lvl {currentChar.level})</h2>
-          <p>HP: {currentChar.hp} / {currentChar.maxHp}</p>
-          <p>Bar: {currentChar.currentBar} / {currentChar.maxBar}</p>
-          <p>Reflex: {currentChar.reflex}</p>
-          <p><strong>Melee:</strong> {meleeText()}</p>
-
-          <h3>Stats</h3>
-          {['str', 'dex', 'con', 'int', 'wis', 'cha'].map(stat => (
-            <div key={stat}>
-              {stat.toUpperCase()}: {currentChar[stat]}{' '}
-              <button onClick={() => updateStat(stat)}>+</button>{' '}
-              Modifier: {modifier(currentChar[stat]) >= 0 ? '+' : ''}{modifier(currentChar[stat])}
-            </div>
-          ))}
-          <p>Skill Points: {skillPoints}</p>
-          <button onClick={levelUp}>Level Up</button>
-
-          <h3>Health Management</h3>
-          <input type="number" placeholder="Amount" id="dmgInput" />
-          <button onClick={() => takeDamage(parseInt(document.getElementById('dmgInput').value))}>Take Damage</button>
-          <button onClick={() => heal(parseInt(document.getElementById('dmgInput').value))}>Heal</button>
-
-          <h3>Bar Management</h3>
-          <input type="number" placeholder="Amount" id="barInput" />
-          <button onClick={() => reduceBar(parseInt(document.getElementById('barInput').value))}>Use Bar</button>
-          <button onClick={() => restoreBar(parseInt(document.getElementById('barInput').value))}>Regain Bar</button>
-        </>
-      )}
-
-      {screen === 'Equipment' && (
-        <EquipmentSheet equipment={equipment} setEquipment={setEquipment} />
-      )}
+    <div style={{ padding: '1rem' }}>
+      <h1>OPDND</h1>
+      <form onSubmit={startCreation}>
+        <input name="name" placeholder="Character Name" required />
+        <input name="passcode" placeholder="4-digit Passcode" maxLength="4" required />
+        <label style={{ marginLeft: '1rem' }}>
+          <input type="checkbox" name="fruit" />
+          Start with Devil Fruit?
+        </label>
+        <button type="submit" style={{ marginLeft: '1rem' }}>Create</button>
+      </form>
+      <h2 style={{ marginTop: '2rem' }}>Characters</h2>
+      <ul>
+        {charList.map((char, i) => (
+          <li key={i}><button onClick={() => enterChar(char)}>{char.name} ({char.race})</button></li>
+        ))}
+      </ul>
     </div>
   );
 }
