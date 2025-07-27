@@ -52,9 +52,10 @@ export default function EquipmentSheet({ equipment, setEquipment }) {
                   />
                 ) : (
                   <>
-                    <p><strong>Damage:</strong> {details.damage}</p>
-                    <p><strong>Durability:</strong> {details.durability}</p>
-                    <p><strong>Value:</strong> {details.value} berries</p>
+                    {details.damage && <p><strong>Damage:</strong> {details.damage}</p>}
+                    {details.range && <p><strong>Range:</strong> {details.range}</p>}
+                    {details.durability && <p><strong>Durability:</strong> {details.durability}</p>}
+                    {details.value && <p><strong>Value:</strong> {details.value} berries</p>}
                   </>
                 )
               )}
