@@ -1,4 +1,3 @@
-// Full App.jsx with: Melee, Stat Modifiers, Bar Management integrated properly
 import React, { useState } from 'react';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
@@ -157,12 +156,15 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
             <h3>Main Stats</h3>
             <ul>
               {Object.entries(currentChar.stats).map(([k, v]) => (
+              <li key={k}>
+                {k.toUpperCase()}: {v}
+                {currentChar.sp > 0 && (
+                  <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
+                )}
+                Modifier: {(v - 10 >= 0 ? '+' : '') + Math.floor((v - 10) / 2)}
+              </li>
                 <li key={k}>
                   {k.toUpperCase()}: {v}
-                  {currentChar.sp > 0 && (
-                    <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
-                  )}
-                  Modifier: {((v - 10) >= 0 ? '+' : '') + Math.floor((v - 10) / 2)}
                   {currentChar.sp > 0 && (
                     <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
                   )}
