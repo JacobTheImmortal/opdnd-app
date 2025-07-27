@@ -5,6 +5,8 @@ import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
 import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
 
+import EquipmentSheet from './EquipmentSheet';
+
 export default function App() {
   const [step, setStep] = useState(1);
   const [charList, setCharList] = useState([]);
@@ -15,6 +17,7 @@ export default function App() {
   const [barAmount, setBarAmount] = useState(0);
   const [actionPoints, setActionPoints] = useState(3);
   const [customActions, setCustomActions] = useState([]);
+const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
   const [newActionName, setNewActionName] = useState('');
   const [newActionBarCost, setNewActionBarCost] = useState(0);
 
@@ -217,10 +220,7 @@ export default function App() {
         )}
 
         {screen === 'Equipment' && (
-          <>
-            <h3>Equipment</h3>
-            <p>Future equipment slots, armor, weapons, etc.</p>
-          </>
+          <EquipmentSheet equipment={equipment} setEquipment={setEquipment} />
         )}
       </div>
     );
