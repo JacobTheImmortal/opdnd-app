@@ -157,8 +157,6 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
             <h3>Main Stats</h3>
             <ul>
               {Object.entries(currentChar.stats).map(([k, v]) => (
-              {/* stat block with modifier */}
-              {/* Modified below */}
                 <li key={k}>
                   {k.toUpperCase()}: {v}
                   {currentChar.sp > 0 && (
