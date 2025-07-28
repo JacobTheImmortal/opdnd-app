@@ -88,28 +88,31 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
   };
 
   const chooseRace = (raceKey) => {
-    const race = races[raceKey];
-    const stats = { ...initStats };
-    Object.entries(race.bonuses || {}).forEach(([k, v]) => (stats[k] += v));
-    const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
-    const level = 1;
-    const derived = calculateDerived(stats, level, race);
-    const char = {
-      ...newChar,
-      race: raceKey,
-      stats,
-      level,
-      sp: race.sp,
-      ...derived,
-      fruit,
-      currentHp: derived.hp,
-      currentBar: derived.bar,
-    };
-    setCharList((prev) => [...prev, char]);
-    setCurrentChar(char);
-    setActionPoints(3);
-    setStep(4);
+  const race = races[raceKey];
+  const stats = { ...initStats };
+  Object.entries(race.bonuses || {}).forEach(([k, v]) => (stats[k] += v));
+  const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
+  const level = 1;
+  const derived = calculateDerived(stats, level, race);
+  const char = {
+    ...newChar,
+    id: Date.now().toString(), // ← Make sure each character has a unique ID
+    race: raceKey,
+    stats,
+    level,
+    sp: race.sp,
+    ...derived,
+    fruit,
+    currentHp: derived.hp,
+    currentBar: derived.bar,
   };
+  setCharList((prev) => [...prev, char]);
+  setCurrentChar(char);
+  setActionPoints(3);
+  setStep(4);
+  saveCharacter(char); // ✅ Save to Supabase so it's persistent
+};
+
 
   const enterChar = (char) => {
     const pass = prompt('Enter 4-digit passcode');
