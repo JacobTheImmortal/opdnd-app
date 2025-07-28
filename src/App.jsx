@@ -183,6 +183,34 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
               updated.currentHp = applyHeal(updated.currentHp, updated.hp, damageAmount);
               setCurrentChar(updated);
             }} style={{ marginLeft: '0.5rem' }}>Heal</button>
+            <h4>Bar Management</h4>
+            <p>Current Bar: {currentChar.currentBar} / {currentChar.bar}</p>
+            <input
+              type="number"
+              value={barAmount}
+              onChange={e => setBarAmount(Number(e.target.value))}
+              placeholder="Amount"
+              style={{ width: '60px' }}
+            />
+            <button
+              onClick={() => {
+                const updated = { ...currentChar };
+                updated.currentBar = spendBar(updated.currentBar, barAmount);
+                setCurrentChar(updated);
+              }}
+            >
+              Use Bar
+            </button>
+            <button
+              onClick={() => {
+                const updated = { ...currentChar };
+                updated.currentBar = gainBar(updated.currentBar, updated.bar, barAmount);
+                setCurrentChar(updated);
+              }}
+              style={{ marginLeft: '0.5rem' }}
+            >
+              Regain Bar
+            </button>
           </>
         )}
 
