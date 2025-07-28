@@ -107,10 +107,10 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
     currentBar: derived.bar,
   };
   setCharList((prev) => [...prev, char]);
+  saveCharacter(char); // ✅ Save to Supabase so it's persistent 
   setCurrentChar(char);
   setActionPoints(3);
   setStep(4);
-  saveCharacter(char); // ✅ Save to Supabase so it's persistent
 };
 
 
