@@ -5,6 +5,7 @@ import { devilFruits } from './devilFruits';
 import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
 import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
+import { supabase } from './supabaseClient';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -12,7 +13,15 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 async function saveCharacter(character) {
   if (!character || !character.id) return;
-  await supabase.from('characters').upsert({ id: character.id, data: character });
+  const { data, error } = await supabase
+    .from('characters')
+    .upsert({ id: character.id, data: character });
+
+  if (error) {
+    console.error('❌ Error saving character:', error);
+  } else {
+    console.log('✅ Character saved:', data);
+  }
 }
 
 async function loadCharacter(id) {
@@ -31,20 +40,19 @@ export default function App() {
   const [currentChar, setCurrentChar] = useState(null);
   useEffect(() => {
   const fetchCharacters = async () => {
-    const { data, error } = await supabase.from('characters').select('*');
-    if (error) {
-      console.error("Failed to fetch characters:", error);
-    } else if (data) {
-      const parsedCharacters = data.map(entry => entry.data);
-      setCharList(parsedCharacters);
+  const { data, error } = await supabase.from('characters').select('*');
+  if (error) {
+    console.error("Failed to fetch characters:", error);
+  } else if (data) {
+    const parsedCharacters = data.map(entry => entry.data);
+    setCharList(parsedCharacters);
 
-      // If you're not currently viewing a character, restore the last one (optional)
-      if (!currentChar && parsedCharacters.length > 0) {
-        setCurrentChar(parsedCharacters[0]);
-        setStep(4); // Go to character view
-      }
+    if (!currentChar && parsedCharacters.length > 0) {
+      setCurrentChar(parsedCharacters[0]);
+      setStep(4);
     }
-  };
+  }
+};
 
   fetchCharacters();
 }, []);
