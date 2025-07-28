@@ -1,9 +1,26 @@
 import React, { useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
 import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
 import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+async function saveCharacter(character) {
+  if (!character || !character.id) return;
+  await supabase.from('characters').upsert({ id: character.id, data: character });
+}
+
+async function loadCharacter(id) {
+  const { data, error } = await supabase.from('characters').select('*').eq('id', id).single();
+  if (!error && data && data.data) {
+    setCurrentChar(data.data);
+  }
+}
 
 import EquipmentSheet from './EquipmentSheet';
 
@@ -77,7 +94,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
   const enterChar = (char) => {
     const pass = prompt('Enter 4-digit passcode');
     if (pass === char.passcode) {
-      setCurrentChar(char);
+      loadCharacter(char.id);
       setActionPoints(3);
       setStep(4);
     } else {
@@ -95,6 +112,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
       updated.currentHp = Math.min(updated.currentHp, derived.hp);
       updated.currentBar = Math.min(updated.currentBar, derived.bar);
       setCurrentChar(updated);
+    saveCharacter(updated);
     }
   };
 
@@ -107,6 +125,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
     updated.currentHp = derived.hp;
     updated.currentBar = derived.bar;
     setCurrentChar(updated);
+    saveCharacter(updated);
     setActionPoints(3);
   };
 
@@ -177,11 +196,13 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
               const updated = { ...currentChar };
               updated.currentHp = applyDamage(updated.currentHp, damageAmount);
               setCurrentChar(updated);
+    saveCharacter(updated);
             }}>Take Damage</button>
             <button onClick={() => {
               const updated = { ...currentChar };
               updated.currentHp = applyHeal(updated.currentHp, updated.hp, damageAmount);
               setCurrentChar(updated);
+    saveCharacter(updated);
             }} style={{ marginLeft: '0.5rem' }}>Heal</button>
             <h4>Bar Management</h4>
             <p>Current Bar: {currentChar.currentBar} / {currentChar.bar}</p>
@@ -197,6 +218,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
                 const updated = { ...currentChar };
                 updated.currentBar = spendBar(updated.currentBar, barAmount);
                 setCurrentChar(updated);
+    saveCharacter(updated);
               }}
             >
               Use Bar
@@ -206,6 +228,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
                 const updated = { ...currentChar };
                 updated.currentBar = gainBar(updated.currentBar, updated.bar, barAmount);
                 setCurrentChar(updated);
+    saveCharacter(updated);
               }}
               style={{ marginLeft: '0.5rem' }}
             >
@@ -235,6 +258,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
                   const updated = { ...currentChar };
                   updated.currentBar -= action.barCost;
                   setCurrentChar(updated);
+    saveCharacter(updated);
                   setActionPoints(prev => prev - 1);
                 }} style={{ marginLeft: '1rem' }}>Use</button>
               </div>
