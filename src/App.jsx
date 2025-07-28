@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
@@ -29,6 +29,19 @@ export default function App() {
   const [charList, setCharList] = useState([]);
   const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
+  useEffect(() => {
+  const fetchCharacters = async () => {
+    const { data, error } = await supabase.from('characters').select('*');
+    if (error) {
+      console.error("Failed to fetch characters:", error);
+    } else if (data) {
+      const parsedCharacters = data.map(entry => entry.data); // Supabase wraps each character in a `data` field
+      setCharList(parsedCharacters);
+    }
+  };
+
+  fetchCharacters();
+}, []);
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
