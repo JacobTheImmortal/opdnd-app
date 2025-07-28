@@ -35,13 +35,20 @@ export default function App() {
     if (error) {
       console.error("Failed to fetch characters:", error);
     } else if (data) {
-      const parsedCharacters = data.map(entry => entry.data); // Supabase wraps each character in a `data` field
+      const parsedCharacters = data.map(entry => entry.data);
       setCharList(parsedCharacters);
+
+      // If you're not currently viewing a character, restore the last one (optional)
+      if (!currentChar && parsedCharacters.length > 0) {
+        setCurrentChar(parsedCharacters[0]);
+        setStep(4); // Go to character view
+      }
     }
   };
 
   fetchCharacters();
 }, []);
+
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
