@@ -109,6 +109,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
     currentHp: derived.hp,
     currentBar: derived.bar,
   };
+  console.log("🧪 Saving this character to Supabase:", char); // 👈 Confirm it's being called
   setCharList((prev) => [...prev, char]);
   saveCharacter(char); // ✅ Save to Supabase so it's persistent 
   setCurrentChar(char);
