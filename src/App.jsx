@@ -6,6 +6,9 @@ import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
 import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
 
+console.log("VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL);
+console.log("VITE_SUPABASE_ANON_KEY:", import.meta.env.VITE_SUPABASE_ANON_KEY);
+
 async function saveCharacter(character) {
   if (!character || !character.id) return;
   const { data, error } = await supabase
