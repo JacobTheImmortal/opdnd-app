@@ -5,10 +5,13 @@ import { devilFruits } from './devilFruits';
 import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
 import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
+import EquipmentSheet from './EquipmentSheet';
 
-console.log("VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL);
-console.log("VITE_SUPABASE_ANON_KEY:", import.meta.env.VITE_SUPABASE_ANON_KEY);
+// 🔒 Stop logging secrets
+// console.log("VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL);
+// console.log("VITE_SUPABASE_ANON_KEY:", import.meta.env.VITE_SUPABASE_ANON_KEY);
 
+// --- Helpers ---
 async function saveCharacter(character) {
   if (!character || !character.id) return;
   const { data, error } = await supabase
@@ -22,57 +25,23 @@ async function saveCharacter(character) {
   }
 }
 
-import EquipmentSheet from './EquipmentSheet';
-
 export default function App() {
-  const [step, setStep] = useState(1);
-  const [charList, setCharList] = useState([]);
+  // ----- Top-level state -----
+  const [step, setStep] = useState(1); // 1: Home, 2: Choose Race, 4: Sheet
+  const [charList, setCharList] = useState([]); // list of character blobs from DB
   const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
-  
-  useEffect(() => {
-  const fetchCharacters = async () => {
-    const { data, error } = await supabase.from('characters').select('*');
-    if (error) {
-      console.error("Failed to fetch characters:", error);
-      return;
-    }
-    if (data) {
-      const parsedCharacters = data.map(entry => entry.data);
-      setCharList(parsedCharacters);
-      // ⛔️ Do NOT auto-open any character here.
-    }
-  };
-  fetchCharacters();
-}, []);
-
-  const loadCharacter = async (id) => {
-  const { data, error } = await supabase
-    .from('characters')
-    .select('*')
-    .eq('id', id)
-    .single();
-  if (error) {
-    console.error('❌ Error loading character:', error);
-    return;
-  }
-  if (data && data.data) {
-    setCurrentChar(data.data);
-    setActionPoints(3);
-    setStep(4);
-  }
-};
-
 
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
   const [actionPoints, setActionPoints] = useState(3);
   const [customActions, setCustomActions] = useState([]);
-const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
+  const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
   const [newActionName, setNewActionName] = useState('');
   const [newActionBarCost, setNewActionBarCost] = useState(0);
 
+  // ----- Constants -----
   const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
   const calculateDerived = (stats, level = 1, race = {}) => {
@@ -87,6 +56,42 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
     return { hp, bar, reflex };
   };
 
+  // ----- Load list on mount (NO AUTO-OPEN) -----
+  useEffect(() => {
+    const fetchCharacters = async () => {
+      const { data, error } = await supabase.from('characters').select('*');
+      if (error) {
+        console.error('Failed to fetch characters:', error);
+        return;
+      }
+      if (data) {
+        const parsedCharacters = data.map((entry) => entry.data);
+        setCharList(parsedCharacters);
+        // ⛔️ Do NOT auto-open any character here.
+      }
+    };
+    fetchCharacters();
+  }, []);
+
+  // ----- Scoped loader (can see setCurrentChar) -----
+  const loadCharacter = async (id) => {
+    const { data, error } = await supabase
+      .from('characters')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) {
+      console.error('❌ Error loading character:', error);
+      return;
+    }
+    if (data && data.data) {
+      setCurrentChar(data.data);
+      setActionPoints(3);
+      setStep(4);
+    }
+  };
+
+  // ----- Create flow -----
   const startCreation = (e) => {
     e.preventDefault();
     const { name, fruit, passcode } = {
@@ -103,58 +108,57 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
   };
 
   const chooseRace = (raceKey) => {
-  const race = races[raceKey];
-  const stats = { ...initStats };
-  Object.entries(race.bonuses || {}).forEach(([k, v]) => (stats[k] += v));
-  const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
-  const level = 1;
-  const derived = calculateDerived(stats, level, race);
-  const char = {
-    ...newChar,
-    id: Date.now().toString(), // ← Make sure each character has a unique ID
-    race: raceKey,
-    stats,
-    level,
-    sp: race.sp,
-    ...derived,
-    fruit,
-    currentHp: derived.hp,
-    currentBar: derived.bar,
+    const race = races[raceKey];
+    const stats = { ...initStats };
+    Object.entries(race.bonuses || {}).forEach(([k, v]) => (stats[k] += v));
+    const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
+    const level = 1;
+    const derived = calculateDerived(stats, level, race);
+    const char = {
+      ...newChar,
+      id: Date.now().toString(), // unique ID per character
+      race: raceKey,
+      stats,
+      level,
+      sp: race.sp,
+      ...derived,
+      fruit,
+      currentHp: derived.hp,
+      currentBar: derived.bar,
+    };
+    setCharList((prev) => [...prev, char]);
+    saveCharacter(char);
+    setCurrentChar(char);
+    setActionPoints(3);
+    setStep(4);
   };
-  console.log("🧪 Saving this character to Supabase:", char); // 👈 Confirm it's being called
-  setCharList((prev) => [...prev, char]);
-  saveCharacter(char); // ✅ Save to Supabase so it's persistent 
-  setCurrentChar(char);
-  setActionPoints(3);
-  setStep(4);
-};
 
-
+  // ----- Enter existing character (PIN gate) -----
   const enterChar = async (char) => {
-  const pass = prompt('Enter 4-digit passcode');
-  if (pass === char.passcode) {
-    await loadCharacter(char.id);
-  } else {
-    alert('Incorrect passcode');
-  }
-};
-
-
-  const increaseStat = (stat) => {
-    if (currentChar.sp > 0) {
-      const updated = { ...currentChar };
-      updated.stats[stat]++;
-      updated.sp--;
-      const derived = calculateDerived(updated.stats, updated.level, races[updated.race]);
-      Object.assign(updated, derived);
-      updated.currentHp = Math.min(updated.currentHp, derived.hp);
-      updated.currentBar = Math.min(updated.currentBar, derived.bar);
-      setCurrentChar(updated);
-    saveCharacter(updated);
+    const pass = prompt('Enter 4-digit passcode');
+    if (pass === char.passcode) {
+      await loadCharacter(char.id);
+    } else {
+      alert('Incorrect passcode');
     }
   };
 
+  // ----- Stat & Level logic -----
+  const increaseStat = (stat) => {
+    if (!currentChar || currentChar.sp <= 0) return;
+    const updated = { ...currentChar };
+    updated.stats[stat]++;
+    updated.sp--;
+    const derived = calculateDerived(updated.stats, updated.level, races[updated.race]);
+    Object.assign(updated, derived);
+    updated.currentHp = Math.min(updated.currentHp, derived.hp);
+    updated.currentBar = Math.min(updated.currentBar, derived.bar);
+    setCurrentChar(updated);
+    saveCharacter(updated);
+  };
+
   const levelUp = () => {
+    if (!currentChar) return;
     const updated = { ...currentChar };
     updated.level++;
     updated.sp += 3;
@@ -167,6 +171,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
     setActionPoints(3);
   };
 
+  // ----- Screens -----
   if (step === 2) {
     return (
       <div style={{ padding: '1rem' }}>
@@ -185,7 +190,9 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
   if (step === 4 && currentChar) {
     return (
       <div style={{ padding: '1rem' }}>
-        <button onClick={() => setStep(1)}>← Back</button>
+        {/* 4) Clear session on Back so we return to selection */}
+        <button onClick={() => { setCurrentChar(null); setStep(1); }}>← Back</button>
+
         <h2>{currentChar.name} (Level {currentChar.level})</h2>
         <p><strong>Race:</strong> {currentChar.race}</p>
         <p><strong>Devil Fruit:</strong> {currentChar.fruit?.name || 'None'}</p>
@@ -214,14 +221,11 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
             <ul>
               {Object.entries(currentChar.stats).map(([k, v]) => (
                 <li key={k}>
-                {k.toUpperCase()}: {v}
-                {currentChar.sp > 0 && (
-                  <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
-                )}
-                Modifier: {(v - 10 >= 0 ? '+' : '') + Math.floor((v - 10) / 2)}
+                  {k.toUpperCase()}: {v}
                   {currentChar.sp > 0 && (
                     <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
                   )}
+                  Modifier: {(v - 10 >= 0 ? '+' : '') + Math.floor((v - 10) / 2)}
                 </li>
               ))}
             </ul>
@@ -234,44 +238,30 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
               const updated = { ...currentChar };
               updated.currentHp = applyDamage(updated.currentHp, damageAmount);
               setCurrentChar(updated);
-    saveCharacter(updated);
+              saveCharacter(updated);
             }}>Take Damage</button>
             <button onClick={() => {
               const updated = { ...currentChar };
               updated.currentHp = applyHeal(updated.currentHp, updated.hp, damageAmount);
               setCurrentChar(updated);
-    saveCharacter(updated);
+              saveCharacter(updated);
             }} style={{ marginLeft: '0.5rem' }}>Heal</button>
+
             <h4>Bar Management</h4>
             <p>Current Bar: {currentChar.currentBar} / {currentChar.bar}</p>
-            <input
-              type="number"
-              value={barAmount}
-              onChange={e => setBarAmount(Number(e.target.value))}
-              placeholder="Amount"
-              style={{ width: '60px' }}
-            />
-            <button
-              onClick={() => {
-                const updated = { ...currentChar };
-                updated.currentBar = spendBar(updated.currentBar, barAmount);
-                setCurrentChar(updated);
-    saveCharacter(updated);
-              }}
-            >
-              Use Bar
-            </button>
-            <button
-              onClick={() => {
-                const updated = { ...currentChar };
-                updated.currentBar = gainBar(updated.currentBar, updated.bar, barAmount);
-                setCurrentChar(updated);
-    saveCharacter(updated);
-              }}
-              style={{ marginLeft: '0.5rem' }}
-            >
-              Regain Bar
-            </button>
+            <input type="number" value={barAmount} onChange={e => setBarAmount(Number(e.target.value))} placeholder="Amount" style={{ width: '60px' }} />
+            <button onClick={() => {
+              const updated = { ...currentChar };
+              updated.currentBar = spendBar(updated.currentBar, barAmount);
+              setCurrentChar(updated);
+              saveCharacter(updated);
+            }}>Use Bar</button>
+            <button onClick={() => {
+              const updated = { ...currentChar };
+              updated.currentBar = gainBar(updated.currentBar, updated.bar, barAmount);
+              setCurrentChar(updated);
+              saveCharacter(updated);
+            }} style={{ marginLeft: '0.5rem' }}>Regain Bar</button>
           </>
         )}
 
@@ -285,18 +275,12 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
               <div key={i} style={{ marginTop: '0.5rem' }}>
                 <strong>{action.name}</strong> – {action.barCost} Bar
                 <button onClick={() => {
-                  if (actionPoints <= 0) {
-                    alert("No Action Points left!");
-                    return;
-                  }
-                  if (currentChar.currentBar < action.barCost) {
-                    alert("Not enough Bar!");
-                    return;
-                  }
+                  if (actionPoints <= 0) { alert('No Action Points left!'); return; }
+                  if (currentChar.currentBar < action.barCost) { alert('Not enough Bar!'); return; }
                   const updated = { ...currentChar };
                   updated.currentBar -= action.barCost;
                   setCurrentChar(updated);
-    saveCharacter(updated);
+                  saveCharacter(updated);
                   setActionPoints(prev => prev - 1);
                 }} style={{ marginLeft: '1rem' }}>Use</button>
               </div>
@@ -321,6 +305,7 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
     );
   }
 
+  // ----- Home -----
   return (
     <div style={{ padding: '1rem' }}>
       <h1>OPDND</h1>
@@ -333,10 +318,16 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
         </label>
         <button type="submit" style={{ marginLeft: '1rem' }}>Create</button>
       </form>
+
       <h2 style={{ marginTop: '2rem' }}>Characters</h2>
       <ul>
-        {charList.map((char, i) => (
-          <li key={i}><button onClick={() => enterChar(char)}>{char.name} ({char.race})</button></li>
+        {charList.map((char) => (
+          // 5) Stable key to avoid row mixing
+          <li key={char.id}>
+            <button onClick={() => enterChar(char)}>
+              {char.name} ({char.race})
+            </button>
+          </li>
         ))}
       </ul>
     </div>
