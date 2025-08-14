@@ -22,13 +22,6 @@ async function saveCharacter(character) {
   }
 }
 
-async function loadCharacter(id) {
-  const { data, error } = await supabase.from('characters').select('*').eq('id', id).single();
-  if (!error && data && data.data) {
-    setCurrentChar(data.data);
-  }
-}
-
 import EquipmentSheet from './EquipmentSheet';
 
 export default function App() {
@@ -36,24 +29,40 @@ export default function App() {
   const [charList, setCharList] = useState([]);
   const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
+  
   useEffect(() => {
   const fetchCharacters = async () => {
-  const { data, error } = await supabase.from('characters').select('*');
-  if (error) {
-    console.error("Failed to fetch characters:", error);
-  } else if (data) {
-    const parsedCharacters = data.map(entry => entry.data);
-    setCharList(parsedCharacters);
-
-    if (!currentChar && parsedCharacters.length > 0) {
-      setCurrentChar(parsedCharacters[0]);
-      setStep(4);
+    const { data, error } = await supabase.from('characters').select('*');
+    if (error) {
+      console.error("Failed to fetch characters:", error);
+      return;
     }
+    if (data) {
+      const parsedCharacters = data.map(entry => entry.data);
+      setCharList(parsedCharacters);
+      // ⛔️ Do NOT auto-open any character here.
+    }
+  };
+  fetchCharacters();
+}, []);
+
+  const loadCharacter = async (id) => {
+  const { data, error } = await supabase
+    .from('characters')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) {
+    console.error('❌ Error loading character:', error);
+    return;
+  }
+  if (data && data.data) {
+    setCurrentChar(data.data);
+    setActionPoints(3);
+    setStep(4);
   }
 };
 
-  fetchCharacters();
-}, []);
 
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
@@ -121,16 +130,15 @@ const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc:
 };
 
 
-  const enterChar = (char) => {
-    const pass = prompt('Enter 4-digit passcode');
-    if (pass === char.passcode) {
-      loadCharacter(char.id);
-      setActionPoints(3);
-      setStep(4);
-    } else {
-      alert('Incorrect passcode');
-    }
-  };
+  const enterChar = async (char) => {
+  const pass = prompt('Enter 4-digit passcode');
+  if (pass === char.passcode) {
+    await loadCharacter(char.id);
+  } else {
+    alert('Incorrect passcode');
+  }
+};
+
 
   const increaseStat = (stat) => {
     if (currentChar.sp > 0) {
