@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
@@ -6,34 +6,46 @@ import { calculateMaxHealth, applyDamage, applyHeal } from './healthUtils';
 import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
 import EquipmentSheet from './EquipmentSheet';
+import { equipmentList } from './equipmentData';
 
-// --- Helpers ---
+/* ----------------------------------
+   Helpers
+-----------------------------------*/
 async function saveCharacter(character) {
   if (!character || !character.id) return;
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('characters')
     .upsert({ id: character.id, data: character });
+  if (error) console.error('❌ Error saving character:', error);
+}
 
-  if (error) {
-    console.error('❌ Error saving character:', error);
-  } else {
-    console.log('✅ Character saved:', data);
-  }
+function uniqueBy(arr, keyFn) {
+  const seen = new Set();
+  return arr.filter(item => {
+    const k = keyFn(item);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 export default function App() {
   // ----- Top-level state -----
   const [step, setStep] = useState(1); // 1: Home, 2: Choose Race, 4: Sheet
-  const [charList, setCharList] = useState([]); // list of character blobs from DB
+  const [charList, setCharList] = useState([]);
   const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
 
+  // sheet UI state
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
   const [actionPoints, setActionPoints] = useState(3);
   const [customActions, setCustomActions] = useState([]);
+
+  // equipment local mirror (also persisted into currentChar.equipment)
   const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
+
   const [newActionName, setNewActionName] = useState('');
   const [newActionBarCost, setNewActionBarCost] = useState(0);
 
@@ -52,7 +64,9 @@ export default function App() {
     return { hp, bar, reflex };
   };
 
-  // ----- Load list on mount (NO AUTO-OPEN) -----
+  /* ----------------------------------
+     Load characters (no auto-open)
+  -----------------------------------*/
   useEffect(() => {
     const fetchCharacters = async () => {
       const { data, error } = await supabase.from('characters').select('*');
@@ -61,15 +75,16 @@ export default function App() {
         return;
       }
       if (data) {
-        const parsedCharacters = data.map((entry) => entry.data);
-        setCharList(parsedCharacters);
-        // ⛔️ Do NOT auto-open any character here.
+        const parsed = data.map(row => row.data);
+        setCharList(parsed);
       }
     };
     fetchCharacters();
   }, []);
 
-  // ----- Scoped loader (can see setCurrentChar) -----
+  /* ----------------------------------
+     Loader (scoped so it can set state)
+  -----------------------------------*/
   const loadCharacter = async (id) => {
     const { data, error } = await supabase
       .from('characters')
@@ -81,26 +96,32 @@ export default function App() {
       return;
     }
     if (data && data.data) {
-      setCurrentChar(data.data);
+      const loaded = data.data;
+      setCurrentChar(loaded);
+      setEquipment(loaded.equipment && Array.isArray(loaded.equipment) && loaded.equipment.length
+        ? loaded.equipment
+        : [{ name: '', quantity: 1, customDesc: '' }]);
       setActionPoints(3);
       setStep(4);
     }
   };
 
-  // ----- Create flow -----
+  /* ----------------------------------
+     Create → choose race
+  -----------------------------------*/
   const startCreation = (e) => {
     e.preventDefault();
     const { name, fruit, passcode } = {
-      name: e.target.name.value,
+      name: e.target.name.value.trim(),
       fruit: e.target.fruit.checked,
-      passcode: e.target.passcode.value,
+      passcode: e.target.passcode.value.trim(),
     };
-    if (name && passcode.length === 4) {
-      setNewChar({ name, passcode, fruit });
-      setStep(2);
-    } else {
+    if (!name || passcode.length !== 4) {
       alert('Enter a name and a 4-digit passcode');
+      return;
     }
+    setNewChar({ name, passcode, fruit });
+    setStep(2);
   };
 
   const chooseRace = (raceKey) => {
@@ -112,7 +133,7 @@ export default function App() {
     const derived = calculateDerived(stats, level, race);
     const char = {
       ...newChar,
-      id: Date.now().toString(), // unique ID per character
+      id: Date.now().toString(),
       race: raceKey,
       stats,
       level,
@@ -121,15 +142,19 @@ export default function App() {
       fruit,
       currentHp: derived.hp,
       currentBar: derived.bar,
+      equipment: [],
     };
-    setCharList((prev) => [...prev, char]);
-    saveCharacter(char);
+    setCharList(prev => [...prev, char]);
     setCurrentChar(char);
+    setEquipment([]);
     setActionPoints(3);
     setStep(4);
+    saveCharacter(char);
   };
 
-  // ----- Enter existing character (PIN gate) -----
+  /* ----------------------------------
+     Enter / delete
+  -----------------------------------*/
   const enterChar = async (char) => {
     const pass = prompt('Enter 4-digit passcode');
     if (pass === char.passcode) {
@@ -139,32 +164,29 @@ export default function App() {
     }
   };
 
-  // ----- Delete character from list (PIN + confirm) -----
   const deleteCharacter = async (char) => {
     const pass = prompt(`Enter 4-digit passcode to DELETE "${char.name}"`);
     if (pass !== char.passcode) {
       alert('Incorrect passcode');
       return;
     }
-    const sure = confirm(`Delete ${char.name}? This cannot be undone.`);
-    if (!sure) return;
-
+    if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
     const { error } = await supabase.from('characters').delete().eq('id', char.id);
     if (error) {
       console.error('❌ Error deleting character:', error);
       alert('Failed to delete character.');
       return;
     }
-    // Remove locally
-    setCharList((prev) => prev.filter((c) => c.id !== char.id));
-    // If we were viewing it, bounce to Home
+    setCharList(prev => prev.filter(c => c.id !== char.id));
     if (currentChar?.id === char.id) {
       setCurrentChar(null);
       setStep(1);
     }
   };
 
-  // ----- Stat & Level logic -----
+  /* ----------------------------------
+     Stats & level
+  -----------------------------------*/
   const increaseStat = (stat) => {
     if (!currentChar || currentChar.sp <= 0) return;
     const updated = { ...currentChar };
@@ -192,7 +214,44 @@ export default function App() {
     setActionPoints(3);
   };
 
-  // ----- Screens -----
+  /* ----------------------------------
+     Equipment → Actions bridge
+  -----------------------------------*/
+  const equipmentActions = useMemo(() => {
+    // Build actions like "Use Pistol" for each distinct equipped item name
+    const names = equipment
+      .filter(it => it && it.name && it.name !== '')
+      .map(it => it.name);
+    const distinct = uniqueBy(names, n => n);
+    return distinct.map(n => ({
+      name: `Use ${n}`,
+      barCost: 0,
+      _kind: 'equipment',
+      itemName: n,
+    }));
+  }, [equipment]);
+
+  // Combined actions list
+  const actionsToShow = useMemo(
+    () => [...defaultActions, ...equipmentActions, ...customActions],
+    [equipmentActions, customActions]
+  );
+
+  // Persist equipment whenever it changes while a character is open
+  const persistEquipment = (updated) => {
+    setEquipment(updated);
+    if (!currentChar) return;
+    const updatedChar = { ...currentChar, equipment: updated };
+    setCurrentChar(updatedChar);
+    saveCharacter(updatedChar);
+  };
+
+  // For displaying equipment details next to actions (optional, v1 just shows name)
+  const findEquipmentDetails = (name) => equipmentList.find(e => e.name === name);
+
+  /* ----------------------------------
+     Renders
+  -----------------------------------*/
   if (step === 2) {
     return (
       <div style={{ padding: '1rem' }}>
@@ -211,7 +270,7 @@ export default function App() {
   if (step === 4 && currentChar) {
     return (
       <div style={{ padding: '1rem' }}>
-        {/* Back clears session so we return to selection */}
+        {/* Back clears the open session */}
         <button onClick={() => { setCurrentChar(null); setStep(1); }}>← Back</button>
 
         <h2>{currentChar.name} (Level {currentChar.level})</h2>
@@ -245,8 +304,8 @@ export default function App() {
                   {k.toUpperCase()}: {v}
                   {currentChar.sp > 0 && (
                     <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
-                  )}
-                  {' '}Modifier: {(v - 10 >= 0 ? '+' : '') + Math.floor((v - 10) / 2)}
+                  )}{' '}
+                  Modifier: {(v - 10 >= 0 ? '+' : '') + Math.floor((v - 10) / 2)}
                 </li>
               ))}
             </ul>
@@ -292,24 +351,54 @@ export default function App() {
             <p>Action Points: {actionPoints}</p>
             <button onClick={() => setActionPoints(3)}>Take Turn</button>
 
-            {[...defaultActions, ...customActions].map((action, i) => (
-              <div key={i} style={{ marginTop: '0.5rem' }}>
-                <strong>{action.name}</strong> – {action.barCost} Bar
-                <button onClick={() => {
-                  if (actionPoints <= 0) { alert('No Action Points left!'); return; }
-                  if (currentChar.currentBar < action.barCost) { alert('Not enough Bar!'); return; }
-                  const updated = { ...currentChar };
-                  updated.currentBar -= action.barCost;
-                  setCurrentChar(updated);
-                  saveCharacter(updated);
-                  setActionPoints(prev => prev - 1);
-                }} style={{ marginLeft: '1rem' }}>Use</button>
-              </div>
-            ))}
+            {actionsToShow.map((action, i) => {
+              const isEquip = action._kind === 'equipment';
+              const eqDetails = isEquip ? findEquipmentDetails(action.itemName) : null;
+              return (
+                <div key={`${action.name}-${i}`} style={{ marginTop: '0.5rem' }}>
+                  <strong>{action.name}</strong>{' '}
+                  {!isEquip && <>– {action.barCost} Bar</>}
+                  {isEquip && eqDetails && (
+                    <span style={{ opacity: 0.8 }}>
+                      {' '}
+                      — {eqDetails.damage ? `${eqDetails.damage}` : ''}
+                      {eqDetails.range ? `, ${eqDetails.range}` : ''}
+                      {eqDetails.durability ? `, Durability ${eqDetails.durability}` : ''}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => {
+                      const cost = action.barCost || 0;
+                      if (actionPoints <= 0) { alert('No Action Points left!'); return; }
+                      if (currentChar.currentBar < cost) { alert('Not enough Bar!'); return; }
+                      const updated = { ...currentChar };
+                      updated.currentBar -= cost;
+                      setCurrentChar(updated);
+                      saveCharacter(updated);
+                      setActionPoints(prev => prev - 1);
+                    }}
+                    style={{ marginLeft: '1rem' }}
+                  >
+                    Use
+                  </button>
+                </div>
+              );
+            })}
 
             <h4 style={{ marginTop: '1rem' }}>Add Custom Action</h4>
-            <input placeholder="Action Name" value={newActionName} onChange={e => setNewActionName(e.target.value)} style={{ marginRight: '0.5rem' }} />
-            <input type="number" placeholder="Bar Cost" value={newActionBarCost} onChange={e => setNewActionBarCost(Number(e.target.value))} style={{ width: '60px', marginRight: '0.5rem' }} />
+            <input
+              placeholder="Action Name"
+              value={newActionName}
+              onChange={e => setNewActionName(e.target.value)}
+              style={{ marginRight: '0.5rem' }}
+            />
+            <input
+              type="number"
+              placeholder="Bar Cost"
+              value={newActionBarCost}
+              onChange={e => setNewActionBarCost(Number(e.target.value))}
+              style={{ width: '60px', marginRight: '0.5rem' }}
+            />
             <button onClick={() => {
               if (!newActionName) return;
               setCustomActions(prev => [...prev, { name: newActionName, barCost: newActionBarCost }]);
@@ -320,13 +409,18 @@ export default function App() {
         )}
 
         {screen === 'Equipment' && (
-          <EquipmentSheet equipment={equipment} setEquipment={setEquipment} />
+          <EquipmentSheet
+            equipment={equipment}
+            setEquipment={persistEquipment}
+          />
         )}
       </div>
     );
   }
 
-  // ----- Home -----
+  /* ----------------------------------
+     Home
+  -----------------------------------*/
   return (
     <div style={{ padding: '1rem' }}>
       <h1>OPDND</h1>
