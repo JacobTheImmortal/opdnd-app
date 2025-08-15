@@ -7,10 +7,6 @@ import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
 import EquipmentSheet from './EquipmentSheet';
 
-// 🔒 Stop logging secrets
-// console.log("VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL);
-// console.log("VITE_SUPABASE_ANON_KEY:", import.meta.env.VITE_SUPABASE_ANON_KEY);
-
 // --- Helpers ---
 async function saveCharacter(character) {
   if (!character || !character.id) return;
@@ -143,6 +139,31 @@ export default function App() {
     }
   };
 
+  // ----- Delete character from list (PIN + confirm) -----
+  const deleteCharacter = async (char) => {
+    const pass = prompt(`Enter 4-digit passcode to DELETE "${char.name}"`);
+    if (pass !== char.passcode) {
+      alert('Incorrect passcode');
+      return;
+    }
+    const sure = confirm(`Delete ${char.name}? This cannot be undone.`);
+    if (!sure) return;
+
+    const { error } = await supabase.from('characters').delete().eq('id', char.id);
+    if (error) {
+      console.error('❌ Error deleting character:', error);
+      alert('Failed to delete character.');
+      return;
+    }
+    // Remove locally
+    setCharList((prev) => prev.filter((c) => c.id !== char.id));
+    // If we were viewing it, bounce to Home
+    if (currentChar?.id === char.id) {
+      setCurrentChar(null);
+      setStep(1);
+    }
+  };
+
   // ----- Stat & Level logic -----
   const increaseStat = (stat) => {
     if (!currentChar || currentChar.sp <= 0) return;
@@ -190,7 +211,7 @@ export default function App() {
   if (step === 4 && currentChar) {
     return (
       <div style={{ padding: '1rem' }}>
-        {/* 4) Clear session on Back so we return to selection */}
+        {/* Back clears session so we return to selection */}
         <button onClick={() => { setCurrentChar(null); setStep(1); }}>← Back</button>
 
         <h2>{currentChar.name} (Level {currentChar.level})</h2>
@@ -199,10 +220,10 @@ export default function App() {
         {currentChar.fruit && <p><em>{currentChar.fruit.ability}</em></p>}
 
         <p>
-          <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} |
-          <strong> Bar:</strong> {currentChar.currentBar} / {currentChar.bar} |
-          <strong> Reflex:</strong> {currentChar.reflex}
-          <strong> Melee:</strong> 1d6 + {Math.floor((currentChar.stats?.str - 10) / 2)}
+          <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} |{' '}
+          <strong>Bar:</strong> {currentChar.currentBar} / {currentChar.bar} |{' '}
+          <strong>Reflex:</strong> {currentChar.reflex} |{' '}
+          <strong>Melee:</strong> 1d6 + {Math.floor((currentChar.stats?.str - 10) / 2)}
         </p>
 
         <button onClick={levelUp}>Level Up (+3 SP & full restore)</button>
@@ -225,7 +246,7 @@ export default function App() {
                   {currentChar.sp > 0 && (
                     <button onClick={() => increaseStat(k)} style={{ marginLeft: '0.5rem' }}>+</button>
                   )}
-                  Modifier: {(v - 10 >= 0 ? '+' : '') + Math.floor((v - 10) / 2)}
+                  {' '}Modifier: {(v - 10 >= 0 ? '+' : '') + Math.floor((v - 10) / 2)}
                 </li>
               ))}
             </ul>
@@ -322,11 +343,9 @@ export default function App() {
       <h2 style={{ marginTop: '2rem' }}>Characters</h2>
       <ul>
         {charList.map((char) => (
-          // 5) Stable key to avoid row mixing
-          <li key={char.id}>
-            <button onClick={() => enterChar(char)}>
-              {char.name} ({char.race})
-            </button>
+          <li key={char.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
+            <button onClick={() => enterChar(char)}>{char.name} ({char.race})</button>
+            <button onClick={() => deleteCharacter(char)} style={{ background: '#fbe9e9', border: '1px solid #e57373' }}>Delete</button>
           </li>
         ))}
       </ul>
