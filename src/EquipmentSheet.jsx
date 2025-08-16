@@ -1,69 +1,86 @@
-import React, { useState } from 'react';
+// EquipmentSheet.jsx
+// Displays only allowed stats, persists full item
+// =================================
+
+import React from 'react';
 import { equipmentList } from './equipmentData';
 
+const allowedStat = (v) => v !== undefined && v !== null && v !== 'n/a' && v !== '';
+
+const EquipmentRow = ({ item, index, onChange, onRemove }) => {
+  const selected = equipmentList.find(e => e.name === item.name) || null;
+
+  return (
+    <div style={{ borderTop: '1px solid #e5e5e5', paddingTop: '0.75rem', marginTop: '0.75rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <select
+          value={item.name || ''}
+          onChange={(e) => onChange(index, { ...item, name: e.target.value })}
+        >
+          <option value="">-- Select Item --</option>
+          {equipmentList.map((eq) => (
+            <option key={eq.name} value={eq.name}>{eq.name}</option>
+          ))}
+        </select>
+
+        <label>
+          Qty
+          <input
+            type="number"
+            min={1}
+            value={item.quantity ?? 1}
+            onChange={(e) => onChange(index, { ...item, quantity: Number(e.target.value) })}
+            style={{ width: 60, marginLeft: 6 }}
+          />
+        </label>
+
+        <button onClick={() => onRemove(index)} style={{ marginLeft: 'auto' }}>Remove</button>
+      </div>
+
+      {/* Visible stats in Equipment tab */}
+      {selected && (
+        <div style={{ marginTop: '0.5rem', paddingLeft: '0.25rem' }}>
+          {allowedStat(selected.damage) && <div><strong>Damage:</strong> {selected.damage}</div>}
+          {allowedStat(selected.range) && <div><strong>Range:</strong> {selected.range}</div>}
+          {allowedStat(selected.ammo) && <div><strong>Ammo:</strong> {selected.ammo}</div>}
+          {allowedStat(selected.durability) && <div><strong>Durability:</strong> {selected.durability}</div>}
+          <div><strong>Weight:</strong> {selected.weight || 'n/a'}</div>
+
+          {allowedStat(selected.description) && (
+            <div style={{ marginTop: 6 }}>
+              <em>{selected.description}</em>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function EquipmentSheet({ equipment, setEquipment }) {
-  const addSlot = () => {
-    setEquipment([...equipment, { name: '', quantity: 1, customDesc: '' }]);
+  const update = (idx, updated) => {
+    const next = equipment.map((e, i) => (i === idx ? updated : e));
+    setEquipment(next);
   };
-
-  const updateSlot = (index, field, value) => {
-    const updated = [...equipment];
-    updated[index][field] = value;
-    setEquipment(updated);
-  };
-
-  const getItemDetails = (name) => {
-    return equipmentList.find(item => item.name === name);
-  };
+  const add = () => setEquipment([...(equipment || []), { name: '', quantity: 1, customDesc: '' }]);
+  const remove = (idx) => setEquipment(equipment.filter((_, i) => i !== idx));
 
   return (
     <div>
       <h3>Equipment</h3>
-      {equipment.map((item, index) => {
-        const details = getItemDetails(item.name);
-        const isCustom = item.name === 'Other' || details?.custom;
-        return (
-          <div key={index} style={{ marginBottom: '1rem' }}>
-            <select
-              value={item.name}
-              onChange={e => updateSlot(index, 'name', e.target.value)}
-            >
-              <option value="">-- Select Item --</option>
-              {equipmentList.map(eq => (
-                <option key={eq.name} value={eq.name}>{eq.name}</option>
-              ))}
-            </select>
-            <input
-              type="number"
-              placeholder="Qty"
-              value={item.quantity}
-              onChange={e => updateSlot(index, 'quantity', parseInt(e.target.value))}
-              style={{ width: '60px', marginLeft: '0.5rem' }}
-            />
-            <div style={{ marginTop: '0.5rem' }}>
-              {item.name && (
-                isCustom ? (
-                  <textarea
-                    placeholder="Describe item..."
-                    value={item.customDesc}
-                    onChange={e => updateSlot(index, 'customDesc', e.target.value)}
-                    rows={2}
-                    style={{ width: '100%' }}
-                  />
-                ) : (
-                  <>
-                    {details.damage && <p><strong>Damage:</strong> {details.damage}</p>}
-                    {details.range && <p><strong>Range:</strong> {details.range}</p>}
-                    {details.durability && <p><strong>Durability:</strong> {details.durability}</p>}
-                    {details.value && <p><strong>Value:</strong> {details.value} berries</p>}
-                  </>
-                )
-              )}
-            </div>
-          </div>
-        );
-      })}
-      <button onClick={addSlot}>+ Add Equipment</button>
+
+      {(equipment && equipment.length > 0) ? (
+        equipment.map((item, i) => (
+          <EquipmentRow key={`eq-${i}-${item.name || 'blank'}`} index={i} item={item} onChange={update} onRemove={remove} />
+        ))
+      ) : (
+        <p>No equipment yet.</p>
+      )}
+
+      <button onClick={add} style={{ marginTop: '0.75rem' }}>+ Add Equipment</button>
+
+      {/* Hidden fields stored with the item but not displayed here: */}
+      {/* useCost, buyValue, sellValue are part of equipmentList entries and will be available to actions/shop later */}
     </div>
   );
 }
