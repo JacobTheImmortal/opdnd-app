@@ -1,10 +1,7 @@
-// EquipmentSheet.jsx
-// Displays only allowed stats, persists full item
-// =================================
-
 import React from 'react';
 import { equipmentList } from './equipmentData';
 
+// Helper to check if a stat should be displayed
 const allowedStat = (v) => v !== undefined && v !== null && v !== 'n/a' && v !== '';
 
 const EquipmentRow = ({ item, index, onChange, onRemove }) => {
@@ -62,6 +59,7 @@ export default function EquipmentSheet({ equipment, setEquipment }) {
     const next = equipment.map((e, i) => (i === idx ? updated : e));
     setEquipment(next);
   };
+
   const add = () => setEquipment([...(equipment || []), { name: '', quantity: 1, customDesc: '' }]);
   const remove = (idx) => setEquipment(equipment.filter((_, i) => i !== idx));
 
@@ -71,7 +69,13 @@ export default function EquipmentSheet({ equipment, setEquipment }) {
 
       {(equipment && equipment.length > 0) ? (
         equipment.map((item, i) => (
-          <EquipmentRow key={`eq-${i}-${item.name || 'blank'}`} index={i} item={item} onChange={update} onRemove={remove} />
+          <EquipmentRow
+            key={`eq-${i}-${item.name || 'blank'}`}
+            index={i}
+            item={item}
+            onChange={update}
+            onRemove={remove}
+          />
         ))
       ) : (
         <p>No equipment yet.</p>
@@ -80,7 +84,7 @@ export default function EquipmentSheet({ equipment, setEquipment }) {
       <button onClick={add} style={{ marginTop: '0.75rem' }}>+ Add Equipment</button>
 
       {/* Hidden fields stored with the item but not displayed here: */}
-      {/* useCost, buyValue, sellValue are part of equipmentList entries and will be available to actions/shop later */}
+      {/* useCost, buyValue, sellValue, growthTime, yield are available in equipmentList entries for use in other tabs */}
     </div>
   );
 }
