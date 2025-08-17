@@ -215,20 +215,23 @@ export default function App() {
   };
 
   /* ----------------------------------
-     Equipment → Actions bridge
+     Equipment → Actions bridge (useCost only)
   -----------------------------------*/
   const equipmentActions = useMemo(() => {
-    // Build actions like "Use Pistol" for each distinct equipped item name
     const names = equipment
       .filter(it => it && it.name && it.name !== '')
       .map(it => it.name);
     const distinct = uniqueBy(names, n => n);
-    return distinct.map(n => ({
-      name: `Use ${n}`,
-      barCost: 0,
-      _kind: 'equipment',
-      itemName: n,
-    }));
+    return distinct.map(n => {
+      const meta = equipmentList.find(e => e.name === n) || {};
+      const cost = Number(meta.useCost) || 0; // default to 0 if not set
+      return {
+        name: `Use ${n}`,
+        barCost: cost,
+        _kind: 'equipment',
+        itemName: n,
+      };
+    });
   }, [equipment]);
 
   // Combined actions list
@@ -245,9 +248,6 @@ export default function App() {
     setCurrentChar(updatedChar);
     saveCharacter(updatedChar);
   };
-
-  // For displaying equipment details next to actions (optional, v1 just shows name)
-  const findEquipmentDetails = (name) => equipmentList.find(e => e.name === name);
 
   /* ----------------------------------
      Renders
@@ -351,39 +351,27 @@ export default function App() {
             <p>Action Points: {actionPoints}</p>
             <button onClick={() => setActionPoints(3)}>Take Turn</button>
 
-            {actionsToShow.map((action, i) => {
-              const isEquip = action._kind === 'equipment';
-              const eqDetails = isEquip ? findEquipmentDetails(action.itemName) : null;
-              return (
-                <div key={`${action.name}-${i}`} style={{ marginTop: '0.5rem' }}>
-                  <strong>{action.name}</strong>{' '}
-                  {!isEquip && <>– {action.barCost} Bar</>}
-                  {isEquip && eqDetails && (
-                    <span style={{ opacity: 0.8 }}>
-                      {' '}
-                      — {eqDetails.damage ? `${eqDetails.damage}` : ''}
-                      {eqDetails.range ? `, ${eqDetails.range}` : ''}
-                      {eqDetails.durability ? `, Durability ${eqDetails.durability}` : ''}
-                    </span>
-                  )}
-                  <button
-                    onClick={() => {
-                      const cost = action.barCost || 0;
-                      if (actionPoints <= 0) { alert('No Action Points left!'); return; }
-                      if (currentChar.currentBar < cost) { alert('Not enough Bar!'); return; }
-                      const updated = { ...currentChar };
-                      updated.currentBar -= cost;
-                      setCurrentChar(updated);
-                      saveCharacter(updated);
-                      setActionPoints(prev => prev - 1);
-                    }}
-                    style={{ marginLeft: '1rem' }}
-                  >
-                    Use
-                  </button>
-                </div>
-              );
-            })}
+            {actionsToShow.map((action, i) => (
+              <div key={`${action.name}-${i}`} style={{ marginTop: '0.5rem' }}>
+                {/* Show equipment actions exactly like core actions */}
+                <strong>{action.name}</strong> – {action.barCost} Bar
+                <button
+                  onClick={() => {
+                    const cost = action.barCost || 0;
+                    if (actionPoints <= 0) { alert('No Action Points left!'); return; }
+                    if (currentChar.currentBar < cost) { alert('Not enough Bar!'); return; }
+                    const updated = { ...currentChar };
+                    updated.currentBar -= cost; // deduct bar for ALL actions
+                    setCurrentChar(updated);
+                    saveCharacter(updated);
+                    setActionPoints(prev => prev - 1); // spend an AP
+                  }}
+                  style={{ marginLeft: '1rem' }}
+                >
+                  Use
+                </button>
+              </div>
+            ))}
 
             <h4 style={{ marginTop: '1rem' }}>Add Custom Action</h4>
             <input
