@@ -61,7 +61,8 @@ export const devilFruits = [
   },
   {
     name: "Potion potion",
-    ability: "You are pretty cool, or warm, or fast, or sleepy, or high. Whatever you just drank probably did it. You can take up to 8 oz of any liquid and add effects to it. Once consumed, the effects apply. Effects include -  Positive - (Strength, Reflexive, Energize, Revitalize, Aware, Tough). Negative - (Weak, Hazed, Exhaust, Drunk, Explode, PaperThin). Your potions don't work when thrown. They only take effect once a target drinks a full 8 oz of the material. Potions last 1 hour or until used up. You can add up to 2 Positive effects to any potion, but you have to also add 1 negative effect for every 2 positive ones. Negative effects will take place after positive ones wear off.",
+    ability: "You are pretty cool, or warm, or fast, or sleepy, or high. Whatever you just drank probably did it. You can take up to 8 oz of any liquid and add effects to it. Once consumed, the effects apply. Effects include -  Positive - (Strength, Reflexive, Energize, Revitalize, Aware, Tough). Negative - (Weak, Hazed, Exhaust, Drunk, Explode, PaperThin). Your potions don't work when thrown. They only take effect once a target drinks a full 8 oz of the material. Potions last 1 hour or until used up. You can add up to 2 Positive effects to any potion, but you have to also add 1 negative effect for every 2 positive ones. Negative effects will take place after positive ones wear off."
+              "Strength - Advantage on Strength rolls. In Battle, Double damage for 2 turns.",
   },
   {
     name: "Rat rat",
