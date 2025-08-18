@@ -1,5 +1,3 @@
-// -------- src/data/devilFruitActions.json --------
-// Paste this file as pure JSON at src/data/devilFruitActions.json
 {
   "Tired Tired": [
     { "name": "Sleep Touch", "barCost": 10 },
