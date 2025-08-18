@@ -7,6 +7,7 @@ import { calculateMaxBar, spendBar, gainBar } from './barUtils';
 import { defaultActions } from './actionsUtils';
 import EquipmentSheet from './EquipmentSheet';
 import { equipmentList } from './equipmentData';
+import { getFruitActions } from './devilFruitActions';
 
 /* ----------------------------------
    Helpers
@@ -243,8 +244,6 @@ export default function App() {
   /* ----------------------------------
      Devil Fruit → Actions bridge
   -----------------------------------*/
-import { getFruitActions } from './devilFruitActions';
-
 const devilFruitActions = useMemo(() => {
   const fruitName = currentChar?.fruit?.name;
   return fruitName ? getFruitActions(fruitName) : [];
