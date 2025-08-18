@@ -1,34 +1,92 @@
 export const devilFruits = [
   {
-    name: "Command Command Fruit",
-    ability: "Allows the user to issue verbal commands that force non-player characters or enemies to act or pause against their will. If the command is resisted, they lose 1 turn instead.",
+    name: "Tired Tired",
+    ability: "Impose sleep and pervasive exhaustion; sap stamina from those nearby.",
   },
   {
-    name: "Vector Vector Fruit",
-    ability: "Allows the user to set a vector on a target they touch. The target is launched in the direction and distance of the vector set. Can be used on objects or people. Great for traversal or force launching.",
+    name: "Air Air",
+    ability: "Manipulate air to snuff flames, siphon air, generate gusts, and achieve brief flight.",
   },
   {
-    name: "Pavo Pavo Fruit",
-    ability: "Allows the user to generate explosions at points they designate with feathers. The feathers stick to enemies or surfaces. After being placed, the user can trigger the explosions at will.",
+    name: "Walk Walk",
+    ability: "Enhance motion and footing; interacts with terrain and momentum (utility-focused).",
   },
   {
-    name: "Berry Berry Fruit",
-    ability: "Allows the user to manipulate, generate, or fire currency as a weapon. Sharp-edged coins can be launched with high velocity. Also allows absorption of currency into the body for mass and form.",
+    name: "glycer glycer",
+    ability: "Volatile coating and detonation effects; crackling strikes and explosive finishes.",
   },
   {
-    name: "Storm Storm Fruit",
-    ability: "Grants the user control over wind and storms. Can summon heavy gusts, lightning, and storm clouds. Also allows limited flight by riding currents of wind.",
+    name: "Survive Survive",
+    ability: "Absorb ailments/afflictions and endure harsh conditions that break normal limits.",
   },
   {
-    name: "Zip Zip Fruit",
-    ability: "User can create zippers on any surface. Used to open portals, containers, or even split objects. Can create zipper-pockets to store items in space.",
+    name: "Twin Twin",
+    ability: "Create or shape duplicate bodies/constructs to act semi-independently.",
   },
   {
-    name: "Color Color Fruit",
-    ability: "User can drain the color from an object or person. Colorless entities become intangible or frozen. The user can re-apply color to animate or restore them.",
+    name: "Water Water",
+    ability: "Shape, separate, and project water; manipulate moisture content of targets.",
   },
   {
-    name: "Lock Lock Fruit",
-    ability: "The user can 'lock' the position or state of an object. A locked door cannot be opened. A locked body cannot move. Locks last 1 turn unless broken by overwhelming force.",
+    name: "Sound Sound",
+    ability: "Control sound: amplify, mute, silence, or alter auditory effects in an area.",
+  },
+  {
+    name: "Dance Dance",
+    ability: "Compel rhythm and motion; set the stage for disco-fueled effects.",
+  },
+  {
+    name: "Race Race",
+    ability: "Temporarily assume traits of other races for adaptive capabilities.",
+  },
+  {
+    name: "Bear Bear Model Panda",
+    ability: "Zoan: transform between humanlike, half‑panda, and full panda forms.",
+  },
+  {
+    name: "State State",
+    ability: "Switch personal state/stance to unlock different capabilities.",
+  },
+  {
+    name: "Sit Sit",
+    ability: "Manipulate position and gravity wells; set, push, or pull objects and foes.",
+  },
+  {
+    name: "Cellar cellar",
+    ability: "Bottle and store essences or entities; release them at will.",
+  },
+  {
+    name: "Rage rage",
+    ability: "Stoke feral fury in yourself or others; escalate aggression and power.",
+  },
+  {
+    name: "Potion potion",
+    ability: "Brew quick infusions from minor to potent elixirs for varied effects.",
+  },
+  {
+    name: "Rat rat",
+    ability: "Command vermin swarms and crown a Rat King to overwhelm foes.",
+  },
+  {
+    name: "Phobia phobia",
+    ability: "Manifest fears, induce nightmares, or overrun minds with terror.",
+  },
+  {
+    name: "Reality reality",
+    ability: "Create a surgical Room to rearrange positions and swap the order of things.",
+  },
+  {
+    name: "Command Command", // alias form already above; kept for actions name match
+    ability: "Issue verbal commands that force targets to obey or lose a turn if resisted.",
+  },
+  {
+    name: "Vector Vector", // alias form already above; kept for actions name match
+    ability: "Set vectors on touch to launch or redirect objects and people.",
+  },
+  {
+    name: "Hurt Hurt",
+    ability: "Summon a devastating avatar or manifestation at great cost.",
   }
 ];
+
+export default devilFruits;
