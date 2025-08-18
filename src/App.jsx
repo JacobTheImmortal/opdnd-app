@@ -250,43 +250,6 @@ const devilFruitActions = useMemo(() => {
   return fruitName ? getFruitActions(fruitName) : [];
 }, [currentChar]);
 
-
-  const devilFruitActions = useMemo(() => {
-    const fruitName = currentChar?.fruit?.name;
-    if (!fruitName) return [];
-    const list = FRUIT_ACTIONS[fruitName] || [];
-    // Render just like other actions with name + cost text
-    return list.map(a => ({
-      name: a.name,
-      barCost: Number(a.barCost) || 0,
-      _kind: 'devilFruit',
-      perTurnCost: Number(a.perTurnCost) || 0,
-    }));
-  }, [currentChar, FRUIT_ACTIONS]);
-
-  // Combined actions list
-  const actionsToShow = useMemo(
-    () => [...defaultActions, ...equipmentActions, ...devilFruitActions, ...customActions],
-    [equipmentActions, devilFruitActions, customActions]
-  );
-
-  // Persist equipment & effects whenever they change while a character is open
-  const persistEquipment = (updated) => {
-    setEquipment(updated);
-    if (!currentChar) return;
-    const updatedChar = { ...currentChar, equipment: updated };
-    setCurrentChar(updatedChar);
-    saveCharacter(updatedChar);
-  };
-
-  const persistEffects = (updated) => {
-    setActiveEffects(updated);
-    if (!currentChar) return;
-    const updatedChar = { ...currentChar, activeEffects: updated };
-    setCurrentChar(updatedChar);
-    saveCharacter(updatedChar);
-  };
-
   /* ----------------------------------
      Renders
   -----------------------------------*/
