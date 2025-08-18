@@ -80,6 +80,10 @@ export const devilFruits = [
     ability: "Touch an object, state a command, the object will go through the command to completion. Once the command is completed, the object will go back to normal. Commands can have multiple layers of complication. Commands with loops drain Bar each loop. Commands Include - Move to, Attack target, Do 1 task, Do this if, Do this after some time has passed",
   },
   {
+    name: "Pavo Pavo",
+    ability: "You are a peacock. You can open your feathers and put targets into a trance. You can pull off your feathers and throw them like kunai.",
+  },
+  {
     name: "Vector Vector", // alias form already above; kept for actions name match
     ability: "Touch an object, You can Move the object anywhere in 3 dimensions up to 30 ft away. You can also lock objects in place making them unmovable, not unbreakable.",
   },
