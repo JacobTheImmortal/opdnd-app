@@ -242,13 +242,36 @@ export default function App() {
   }, [equipment]);
 
   /* ----------------------------------
-     Devil Fruit → Actions bridge
+     Devil Fruit → Actions bridge (external JSON)
   -----------------------------------*/
-const devilFruitActions = useMemo(() => {
-  const fruitName = currentChar?.fruit?.name;
-  return fruitName ? getFruitActions(fruitName) : [];
-}, [currentChar]);
-   
+  const devilFruitActions = useMemo(() => {
+    const fruitName = currentChar?.fruit?.name;
+    return fruitName ? getFruitActions(fruitName) : [];
+  }, [currentChar]);
+
+  // Combined actions list
+  const actionsToShow = useMemo(
+    () => [...defaultActions, ...equipmentActions, ...devilFruitActions, ...customActions],
+    [equipmentActions, devilFruitActions, customActions]
+  );
+
+  // Persist equipment & effects whenever they change while a character is open
+  const persistEquipment = (updated) => {
+    setEquipment(updated);
+    if (!currentChar) return;
+    const updatedChar = { ...currentChar, equipment: updated };
+    setCurrentChar(updatedChar);
+    saveCharacter(updatedChar);
+  };
+
+  const persistEffects = (updated) => {
+    setActiveEffects(updated);
+    if (!currentChar) return;
+    const updatedChar = { ...currentChar, activeEffects: updated };
+    setCurrentChar(updatedChar);
+    saveCharacter(updatedChar);
+  };
+
   /* ----------------------------------
      Renders
   -----------------------------------*/
@@ -275,7 +298,6 @@ const devilFruitActions = useMemo(() => {
 
         <h2>{currentChar.name} (Level {currentChar.level})</h2>
         <p><strong>Race:</strong> {currentChar.race}</p>
-        {/* Devil Fruit name moved to its own tab */}
 
         <p>
           <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} |{' '}
