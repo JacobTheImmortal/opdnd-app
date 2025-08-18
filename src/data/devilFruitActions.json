@@ -1,11 +1,92 @@
+// -------- src/data/devilFruitActions.json --------
+// Paste this file as pure JSON at src/data/devilFruitActions.json
 {
-  "Storm Storm Fruit": [
-    { "name": "Gust", "barCost": 5 },
-    { "name": "Flight", "barCost": 10, "perTurnCost": 10 }
-  ],
   "Tired Tired": [
     { "name": "Sleep Touch", "barCost": 10 },
-    { "name": "Aura of Exhaust", "barCost": 0, "perTurnCost": 5 }
+    { "name": "Aura of Exhaust", "barCost": 5 }
+  ],
+  "Air Air": [
+    { "name": "Snuff", "barCost": 5 },
+    { "name": "Siphon", "barCost": 10 },
+    { "name": "Flight", "barCost": 10 },
+    { "name": "PushBack", "barCost": 5 }
+  ],
+  "Walk Walk": [],
+  "glycer glycer": [
+    { "name": "Explode!", "barCost": 20 },
+    { "name": "Crackle Fist", "barCost": 10 },
+    { "name": "Coat", "barCost": 5 }
+  ],
+  "Survive Survive": [
+    { "name": "Affliction absorption", "barCost": 20 }
+  ],
+  "Twin Twin": [
+    { "name": "Body maker", "barCost": 0 }
+  ],
+  "Water Water": [
+    { "name": "Water Ball", "barCost": 5 },
+    { "name": "Shape Water", "barCost": 5 },
+    { "name": "Separate", "barCost": 5 },
+    { "name": "Moisture Grab", "barCost": 5 }
+  ],
+  "Sound Sound": [
+    { "name": "Auditory effect", "barCost": 2 },
+    { "name": "Silence", "barCost": 5 },
+    { "name": "Amp Sound", "barCost": 3 },
+    { "name": "Mute", "barCost": 0 }
+  ],
+  "Dance Dance": [
+    { "name": "Disco Time", "barCost": 0 }
+  ],
+  "Race Race": [
+    { "name": "Race Change", "barCost": 20 }
+  ],
+  "Bear Bear Model Panda": [
+    { "name": "HumanLike", "barCost": 0 },
+    { "name": "Half Panda", "barCost": 0 },
+    { "name": "Full Panda", "barCost": 0 }
+  ],
+  "State State": [
+    { "name": "State Change", "barCost": 15 }
+  ],
+  "Sit Sit": [
+    { "name": "PlaceDown", "barCost": 0 },
+    { "name": "Gravity Well", "barCost": 10 },
+    { "name": "Push", "barCost": 5 },
+    { "name": "Pull", "barCost": 5 }
+  ],
+  "Cellar cellar": [
+    { "name": "Bottle", "barCost": 5 },
+    { "name": "Release", "barCost": 0 }
+  ],
+  "Rage rage": [
+    { "name": "Enrage", "barCost": 0 }
+  ],
+  "Potion potion": [
+    { "name": "Lesser Potion", "barCost": 2 },
+    { "name": "Greater Potion", "barCost": 5 },
+    { "name": "Elixir", "barCost": 10 }
+  ],
+  "Rat rat": [
+    { "name": "Summon rats", "barCost": 5 },
+    { "name": "Rat King", "barCost": 10 }
+  ],
+  "Phobia phobia": [
+    { "name": "Nightmare", "barCost": 10 },
+    { "name": "Phobia Man", "barCost": 10 },
+    { "name": "Overwhelm", "barCost": 20 }
+  ],
+  "Reality reality": [
+    { "name": "Room", "barCost": 10 },
+    { "name": "Shamble", "barCost": 10 },
+    { "name": "Order Swap", "barCost": 20 }
+  ],
+  "Command Command": [
+    { "name": "Command", "barCost": 10 }
+  ],
+  "Pavo Pavo Fruit - Peacock": [],
+  "Vector Vector": [],
+  "Hurt Hurt": [
+    { "name": "Spawn Woman", "barCost": 50 }
   ]
-  // ...every fruit -> array of actions
 }
