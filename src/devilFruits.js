@@ -69,23 +69,23 @@ export const devilFruits = [
   },
   {
     name: "Phobia phobia",
-    ability: "Manifest fears, induce nightmares, or overrun minds with terror.",
+    ability: "You're a scary dude. You can Make a person’s worst fear come to life. Pretty cool. Abilities Include - Nightmare, Choose a target, You project their worst fear in front of them. Failed CON saving throw and they run away at least 30 ft from your location. Phobia Man, Create a powerful looking illusionary man within a 60 ft radius of yourself. Enemies will be compelled to target the man. Overwhelm, Send out a wave of fear in a 20 ft radius. All beings in the radius on a failed CON save will instantly be knocked out(Skip next turn).",
   },
   {
     name: "Reality reality",
-    ability: "Create a surgical Room to rearrange positions and swap the order of things.",
+    ability: "OMG! I cannot believe what I just heard! (The world pauses so you can take in this hot goss) You look towards the camera at the viewer, “That evil guy just said he was gonna kill all our families! That threat isn't very inclusive to orphans”. Abilities Include - CUT!, Stop time and take a breather. You can't do anything or affect anything. But you can complain to the DMs. When you start time again, all beings within view take 1 damage. Question: You as your character can ask one of the DM’s a single simple question about the campaign. The DM does not have to answer but will be inclined to bargain. Look away. If you roll bad you can tell the DM’s to look away while you secretly change the number on the Dice.",
   },
   {
     name: "Command Command", // alias form already above; kept for actions name match
-    ability: "Issue verbal commands that force targets to obey or lose a turn if resisted.",
+    ability: "Touch an object, state a command, the object will go through the command to completion. Once the command is completed, the object will go back to normal. Commands can have multiple layers of complication. Commands with loops drain Bar each loop. Commands Include - Move to, Attack target, Do 1 task, Do this if, Do this after some time has passed",
   },
   {
     name: "Vector Vector", // alias form already above; kept for actions name match
-    ability: "Set vectors on touch to launch or redirect objects and people.",
+    ability: "Touch an object, You can Move the object anywhere in 3 dimensions up to 30 ft away. You can also lock objects in place making them unmovable, not unbreakable.",
   },
   {
     name: "Hurt Hurt",
-    ability: "Summon a devastating avatar or manifestation at great cost.",
+    ability: "You hold out your hand. A beautiful woman appears on your palm. She glows and shines and dances. Her beauty is unmatched. She doesn't speak, she doesnt stop, she just dances. Those who look upon her are filled with the feeling of joy or intense anger. You are not affected by the woman. Though you are given knowledge about this dancing spectacle. She has a special power. You can heal those around you by hurting her. She is very fragile. You break her arms and legs with ease. She still dances regardless. Your friend has fallen very ill. Basically dead. You bring out the woman. You cry. You grab her body with one hand and head with another. She struggles to dance. You pull off her head and your friend is healed.",
   }
 ];
 
