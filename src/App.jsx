@@ -107,6 +107,7 @@ export default function App() {
         : [{ name: '', quantity: 1, customDesc: '' }]);
       setActionPoints(3);
       setActiveEffects(loaded.activeEffects || []);
+      setScreen('Main');
       setStep(4);
     }
   };
@@ -149,12 +150,14 @@ export default function App() {
       currentBar: derived.bar,
       equipment: [],
       activeEffects: [],
+      skills: [],
     };
     setCharList(prev => [...prev, char]);
     setCurrentChar(char);
     setEquipment([]);
     setActiveEffects([]);
     setActionPoints(3);
+    setScreen('Main');
     setStep(4);
     saveCharacter(char);
   };
@@ -309,7 +312,7 @@ export default function App() {
         <button onClick={levelUp}>Level Up (+3 SP & full restore)</button>
 
         <div style={{ marginTop: '1rem' }}>
-          {['Main', 'Actions', 'Equipment', 'Devil Fruit'].map((tab) => (
+          {['Main', 'Actions', 'Equipment', 'Devil Fruit', 'Skill Tree'].map((tab) => (
             <button key={tab} onClick={() => setScreen(tab)} style={{ marginRight: '0.5rem' }}>
               {tab}
             </button>
@@ -363,6 +366,26 @@ export default function App() {
               setCurrentChar(updated);
               saveCharacter(updated);
             }} style={{ marginLeft: '0.5rem' }}>Regain Bar</button>
+
+            {/* Rest buttons */}
+            <div style={{ marginTop: '1rem' }}>
+              <button style={{ color: 'crimson', marginRight: '1rem' }} onClick={() => {
+                const updated = { ...currentChar };
+                // Long Rest: +10 current HP (cap at max), Bar to full
+                updated.currentHp = Math.min(updated.currentHp + 10, updated.hp);
+                updated.currentBar = updated.bar;
+                setCurrentChar(updated);
+                saveCharacter(updated);
+              }}>Long Rest</button>
+              <button style={{ color: 'crimson' }} onClick={() => {
+                const updated = { ...currentChar };
+                // Short Rest: +50% of max bar to current (cap at max)
+                const bonus = Math.floor(updated.bar * 0.5);
+                updated.currentBar = Math.min(updated.currentBar + bonus, updated.bar);
+                setCurrentChar(updated);
+                saveCharacter(updated);
+              }}>Short Rest</button>
+            </div>
           </>
         )}
 
@@ -480,6 +503,42 @@ export default function App() {
               </>
             ) : (
               <p>No Devil Fruit.</p>
+            )}
+          </div>
+        )}
+
+        {screen === 'Skill Tree' && (
+          <div style={{ marginTop: '0.75rem' }}>
+            <h3>Skill Tree</h3>
+            <p>Skill Points: {currentChar.sp}</p>
+            <button onClick={() => {
+              if (currentChar.sp <= 0) { alert('No Skill Points left.'); return; }
+              const updated = { ...currentChar };
+              updated.sp -= 1;
+              setCurrentChar(updated);
+              saveCharacter(updated);
+            }}>Spend Skill Point</button>
+
+            <div style={{ marginTop: '1rem' }}>
+              <button onClick={() => {
+                const name = prompt('Skill name?');
+                if (!name) return;
+                const desc = prompt('Skill description?') || '';
+                const updated = { ...currentChar };
+                const next = Array.isArray(updated.skills) ? [...updated.skills] : [];
+                next.push({ name, description: desc });
+                updated.skills = next;
+                setCurrentChar(updated);
+                saveCharacter(updated);
+              }}>+ Add Skill</button>
+            </div>
+
+            {Array.isArray(currentChar.skills) && currentChar.skills.length > 0 && (
+              <ul style={{ marginTop: '1rem' }}>
+                {currentChar.skills.map((s, i) => (
+                  <li key={`skill-${i}`}><strong>{s.name}</strong>{s.description ? ` — ${s.description}` : ''}</li>
+                ))}
+              </ul>
             )}
           </div>
         )}
