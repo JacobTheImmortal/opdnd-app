@@ -243,43 +243,13 @@ export default function App() {
   /* ----------------------------------
      Devil Fruit → Actions bridge
   -----------------------------------*/
-  const FRUIT_ACTIONS = useMemo(() => ({
-    // name -> list of actions
-    'Air Air(Logia)': [
-      { name: 'Snuff', barCost: 5 },
-      { name: 'Siphon', barCost: 0, perTurnCost: 10 },
-      { name: 'Flight', barCost: 10 },
-      { name: 'PushBack', barCost: 5 },
-    ],
-    'Tired Tired': [
-      { name: 'Sleep Touch', barCost: 10 },
-      { name: 'Aura of Exhaust', barCost: 0, perTurnCost: 5 },
-    ],
-    'Water Water': [
-      { name: 'Water Ball', barCost: 5 },
-      { name: 'Shape Water', barCost: 0, perTurnCost: 5 },
-      { name: 'Separate', barCost: 5 },
-      { name: 'Moisture Grab', barCost: 5 },
-    ],
-    'Phobia Phobia': [
-      { name: 'Nightmare', barCost: 10 },
-      { name: 'Phobia Man', barCost: 10, perTurnCost: 5 },
-      { name: 'Overwhelm', barCost: 20 },
-    ],
-    'Rage Rage': [
-      { name: 'Enrage', barCost: 0, perTurnCost: 10 },
-    ],
-    'Bear Bear Model Panda': [
-      { name: 'HumanLike', barCost: 0 },
-      { name: 'Half Panda', barCost: 0, perTurnCost: 5 },
-      { name: 'Full Panda', barCost: 0, perTurnCost: 5 },
-    ],
-    'State State': [
-      { name: 'State Change', barCost: 15 },
-    ],
-    'Dance Dance': [ { name: 'Disco Time', barCost: 0 } ],
-    'Walk Walk': [ ],
-  }), []);
+import { getFruitActions } from './devilFruitActions';
+
+const devilFruitActions = useMemo(() => {
+  const fruitName = currentChar?.fruit?.name;
+  return fruitName ? getFruitActions(fruitName) : [];
+}, [currentChar]);
+
 
   const devilFruitActions = useMemo(() => {
     const fruitName = currentChar?.fruit?.name;
