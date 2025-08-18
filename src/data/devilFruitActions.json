@@ -30,7 +30,7 @@
   "Sound Sound": [
     { "name": "Auditory effect", "barCost": 2 },
     { "name": "Silence", "barCost": 5 },
-    { "name": "Amp Up", "barCost": 3 },
+    { "name": "Amp Up", "barCost": 3 }
   ],
   "Dance Dance": [
     { "name": "Disco Time", "barCost": 0 }
@@ -47,7 +47,7 @@
     { "name": "State Change", "barCost": 15 }
   ],
   "Sit Sit": [
-    { "name": "Sit", "barCost": 10 }, 
+    { "name": "Sit", "barCost": 10 }
   ],
   "Cellar cellar": [
     { "name": "Cellar Door", "barCost": 20 },
@@ -57,7 +57,7 @@
     { "name": "Enrage", "barCost": 10 }
   ],
   "Potion potion": [
-    { "name": "Apply Effect", "barCost": 15 },
+    { "name": "Apply Effect", "barCost": 15 }
   ],
   "Rat rat": [],
   "Phobia phobia": [
