@@ -1,0 +1,11 @@
+{
+  "Storm Storm Fruit": [
+    { "name": "Gust", "barCost": 5 },
+    { "name": "Flight", "barCost": 10, "perTurnCost": 10 }
+  ],
+  "Tired Tired": [
+    { "name": "Sleep Touch", "barCost": 10 },
+    { "name": "Aura of Exhaust", "barCost": 0, "perTurnCost": 5 }
+  ]
+  // ...every fruit -> array of actions
+}
