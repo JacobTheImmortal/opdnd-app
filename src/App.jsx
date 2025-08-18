@@ -30,9 +30,25 @@ function uniqueBy(arr, keyFn) {
   });
 }
 
+/* Recalc derived stats for level/race/stat changes */
+function recalcDerived(char) {
+  const race = races[char.race] || {};
+  const stats = char.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+  const level = char.level || 1;
+  const baseHP = race.hp || 20;
+  const baseBar = race.bar || 100;
+  const con = stats.con || 10;
+  const int = stats.int || 10;
+  const wis = stats.wis || 10;
+  const hp = calculateMaxHealth(baseHP, con, level);
+  const bar = calculateMaxBar(baseBar, int, wis, level);
+  const reflex = (race.reflex || 5) + Math.floor(stats.dex / 5) + Math.floor(level / 3);
+  return { hp, bar, reflex };
+}
+
 export default function App() {
   // ----- Top-level state -----
-  const [step, setStep] = useState(1); // 1: Home, 2: Choose Race, 4: Sheet
+  const [step, setStep] = useState(1); // 0: Overview, 1: Home, 2: Choose Race, 3: DevTools, 4: Sheet
   const [charList, setCharList] = useState([]);
   const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
@@ -276,8 +292,95 @@ export default function App() {
   };
 
   /* ----------------------------------
+     Admin / DM tools helpers
+  -----------------------------------*/
+  const adminDelete = async (char) => {
+    if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
+    const { error } = await supabase.from('characters').delete().eq('id', char.id);
+    if (error) {
+      alert('Delete failed.');
+      return;
+    }
+    setCharList(prev => prev.filter(c => c.id !== char.id));
+  };
+
+  const adminCopy = async (char) => {
+    const clone = { ...char, id: `${Date.now()}_${Math.floor(Math.random()*1000)}`, name: `${char.name} (Copy)` };
+    const { error } = await supabase.from('characters').insert({ id: clone.id, data: clone });
+    if (error) { alert('Copy failed.'); return; }
+    setCharList(prev => [...prev, clone]);
+  };
+
+  const adminLevelAdjust = async (char, delta) => {
+    const updated = { ...char, level: Math.max(1, (char.level || 1) + delta) };
+    const derived = recalcDerived(updated);
+    Object.assign(updated, derived);
+    updated.currentHp = Math.min(updated.currentHp ?? derived.hp, derived.hp);
+    updated.currentBar = Math.min(updated.currentBar ?? derived.bar, derived.bar);
+    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
+    if (error) { alert('Level change failed.'); return; }
+    setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+  };
+
+  const adminModifyFruit = async (char) => {
+    const current = char.fruit?.name || '';
+    const names = devilFruits.map(f => f.name).join(', ');
+    const input = prompt(`Enter Devil Fruit name (or type 'none' to remove)\nAvailable: ${names}`, current);
+    if (input === null) return;
+    const trimmed = input.trim();
+    let updated = { ...char };
+    if (!trimmed || trimmed.toLowerCase() === 'none') {
+      updated.fruit = null;
+    } else {
+      const found = devilFruits.find(f => f.name.toLowerCase() === trimmed.toLowerCase());
+      if (!found) { alert('Fruit not found.'); return; }
+      updated.fruit = { name: found.name, ability: found.ability };
+    }
+    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
+    if (error) { alert('Update failed.'); return; }
+    setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+  };
+
+  /* ----------------------------------
      Renders
   -----------------------------------*/
+  // Overview page
+  if (step === 0) {
+    return (
+      <div style={{ padding: '1rem' }}>
+        <button onClick={() => setStep(1)}>← Back</button>
+        <h1>OPDND — Overview</h1>
+        <p>Description goes here</p>
+      </div>
+    );
+  }
+
+  // DM / DevTools page
+  if (step === 3) {
+    return (
+      <div style={{ padding: '1rem' }}>
+        <button onClick={() => setStep(1)}>← Back</button>
+        <h1>Dungeon Master Tools</h1>
+        <p style={{ color: '#666' }}>Administer characters below.</p>
+        <ul>
+          {charList.map((char) => (
+            <li key={char.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem' }}>
+              <span style={{ minWidth: '280px' }}>{char.name} ({char.race})</span>
+              <button onClick={() => adminDelete(char)} style={{ background: '#fde7e7' }}>Delete</button>
+              <button onClick={() => adminCopy(char)}>Copy</button>
+              <span>
+                <button onClick={() => adminLevelAdjust(char, +1)}>Lvl +</button>
+                <button onClick={() => adminLevelAdjust(char, -1)} style={{ marginLeft: '0.25rem' }}>Lvl -</button>
+              </span>
+              <button onClick={() => adminModifyFruit(char)}>Modify DevilFruit</button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Choose race page
   if (step === 2) {
     return (
       <div style={{ padding: '1rem' }}>
@@ -293,6 +396,7 @@ export default function App() {
     );
   }
 
+  // Character sheet
   if (step === 4 && currentChar) {
     return (
       <div style={{ padding: '1rem' }}>
@@ -550,8 +654,14 @@ export default function App() {
      Home
   -----------------------------------*/
   return (
-    <div style={{ padding: '1rem' }}>
+    <div style={{ padding: '1rem', position: 'relative', minHeight: '100vh' }}>
       <h1>OPDND</h1>
+
+      {/* Top-right Overview button */}
+      <div style={{ position: 'fixed', right: '1rem', top: '1rem' }}>
+        <button style={{ color: 'crimson' }} onClick={() => setStep(0)}>Overview</button>
+      </div>
+
       <form onSubmit={startCreation}>
         <input name="name" placeholder="Character Name" required />
         <input name="passcode" placeholder="4-digit Passcode" maxLength="4" required />
@@ -571,6 +681,18 @@ export default function App() {
           </li>
         ))}
       </ul>
+
+      {/* Bottom-left Dev Tool Mode */}
+      <div style={{ position: 'fixed', left: '1rem', bottom: '1rem' }}>
+        <button style={{ color: 'crimson' }}
+          onClick={() => {
+            const pin = prompt('Enter Dev PIN');
+            if (pin === '5637') setStep(3); else alert('Incorrect PIN.');
+          }}
+        >
+          DevTool Mode
+        </button>
+      </div>
     </div>
   );
 }
