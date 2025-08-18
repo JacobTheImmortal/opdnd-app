@@ -248,7 +248,7 @@ const devilFruitActions = useMemo(() => {
   const fruitName = currentChar?.fruit?.name;
   return fruitName ? getFruitActions(fruitName) : [];
 }, [currentChar]);
-
+   
   /* ----------------------------------
      Renders
   -----------------------------------*/
