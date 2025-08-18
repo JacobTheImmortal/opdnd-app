@@ -74,7 +74,9 @@
     { "name": "Command", "barCost": 10 }
   ],
   "Pavo Pavo Fruit - Peacock": [],
-  "Vector Vector": [],
+  "Vector Vector": [
+    { "name": "Vector Touch", "barCost": 15 }
+  ],
   "Hurt Hurt": [
     { "name": "Spawn Woman", "barCost": 50 }
   ]
