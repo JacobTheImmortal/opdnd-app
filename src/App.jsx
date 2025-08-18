@@ -49,6 +49,9 @@ export default function App() {
   const [newActionName, setNewActionName] = useState('');
   const [newActionBarCost, setNewActionBarCost] = useState(0);
 
+  // Active, persistent effects (deducted at start of turn)
+  const [activeEffects, setActiveEffects] = useState([]); // [{ name, perTurnCost }]
+
   // ----- Constants -----
   const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
@@ -102,6 +105,7 @@ export default function App() {
         ? loaded.equipment
         : [{ name: '', quantity: 1, customDesc: '' }]);
       setActionPoints(3);
+      setActiveEffects(loaded.activeEffects || []);
       setStep(4);
     }
   };
@@ -143,10 +147,12 @@ export default function App() {
       currentHp: derived.hp,
       currentBar: derived.bar,
       equipment: [],
+      activeEffects: [],
     };
     setCharList(prev => [...prev, char]);
     setCurrentChar(char);
     setEquipment([]);
+    setActiveEffects([]);
     setActionPoints(3);
     setStep(4);
     saveCharacter(char);
@@ -234,17 +240,79 @@ export default function App() {
     });
   }, [equipment]);
 
+  /* ----------------------------------
+     Devil Fruit → Actions bridge
+  -----------------------------------*/
+  const FRUIT_ACTIONS = useMemo(() => ({
+    // name -> list of actions
+    'Air Air(Logia)': [
+      { name: 'Snuff', barCost: 5 },
+      { name: 'Siphon', barCost: 0, perTurnCost: 10 },
+      { name: 'Flight', barCost: 10 },
+      { name: 'PushBack', barCost: 5 },
+    ],
+    'Tired Tired': [
+      { name: 'Sleep Touch', barCost: 10 },
+      { name: 'Aura of Exhaust', barCost: 0, perTurnCost: 5 },
+    ],
+    'Water Water': [
+      { name: 'Water Ball', barCost: 5 },
+      { name: 'Shape Water', barCost: 0, perTurnCost: 5 },
+      { name: 'Separate', barCost: 5 },
+      { name: 'Moisture Grab', barCost: 5 },
+    ],
+    'Phobia Phobia': [
+      { name: 'Nightmare', barCost: 10 },
+      { name: 'Phobia Man', barCost: 10, perTurnCost: 5 },
+      { name: 'Overwhelm', barCost: 20 },
+    ],
+    'Rage Rage': [
+      { name: 'Enrage', barCost: 0, perTurnCost: 10 },
+    ],
+    'Bear Bear Model Panda': [
+      { name: 'HumanLike', barCost: 0 },
+      { name: 'Half Panda', barCost: 0, perTurnCost: 5 },
+      { name: 'Full Panda', barCost: 0, perTurnCost: 5 },
+    ],
+    'State State': [
+      { name: 'State Change', barCost: 15 },
+    ],
+    'Dance Dance': [ { name: 'Disco Time', barCost: 0 } ],
+    'Walk Walk': [ ],
+  }), []);
+
+  const devilFruitActions = useMemo(() => {
+    const fruitName = currentChar?.fruit?.name;
+    if (!fruitName) return [];
+    const list = FRUIT_ACTIONS[fruitName] || [];
+    // Render just like other actions with name + cost text
+    return list.map(a => ({
+      name: a.name,
+      barCost: Number(a.barCost) || 0,
+      _kind: 'devilFruit',
+      perTurnCost: Number(a.perTurnCost) || 0,
+    }));
+  }, [currentChar, FRUIT_ACTIONS]);
+
   // Combined actions list
   const actionsToShow = useMemo(
-    () => [...defaultActions, ...equipmentActions, ...customActions],
-    [equipmentActions, customActions]
+    () => [...defaultActions, ...equipmentActions, ...devilFruitActions, ...customActions],
+    [equipmentActions, devilFruitActions, customActions]
   );
 
-  // Persist equipment whenever it changes while a character is open
+  // Persist equipment & effects whenever they change while a character is open
   const persistEquipment = (updated) => {
     setEquipment(updated);
     if (!currentChar) return;
     const updatedChar = { ...currentChar, equipment: updated };
+    setCurrentChar(updatedChar);
+    saveCharacter(updatedChar);
+  };
+
+  const persistEffects = (updated) => {
+    setActiveEffects(updated);
+    if (!currentChar) return;
+    const updatedChar = { ...currentChar, activeEffects: updated };
     setCurrentChar(updatedChar);
     saveCharacter(updatedChar);
   };
@@ -275,8 +343,7 @@ export default function App() {
 
         <h2>{currentChar.name} (Level {currentChar.level})</h2>
         <p><strong>Race:</strong> {currentChar.race}</p>
-        <p><strong>Devil Fruit:</strong> {currentChar.fruit?.name || 'None'}</p>
-        {currentChar.fruit && <p><em>{currentChar.fruit.ability}</em></p>}
+        {/* Devil Fruit name moved to its own tab */}
 
         <p>
           <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} |{' '}
@@ -288,7 +355,7 @@ export default function App() {
         <button onClick={levelUp}>Level Up (+3 SP & full restore)</button>
 
         <div style={{ marginTop: '1rem' }}>
-          {['Main', 'Actions', 'Equipment'].map((tab) => (
+          {['Main', 'Actions', 'Equipment', 'Devil Fruit'].map((tab) => (
             <button key={tab} onClick={() => setScreen(tab)} style={{ marginRight: '0.5rem' }}>
               {tab}
             </button>
@@ -349,11 +416,39 @@ export default function App() {
           <>
             <h3>Actions</h3>
             <p>Action Points: {actionPoints}</p>
-            <button onClick={() => setActionPoints(3)}>Take Turn</button>
+            <button onClick={() => {
+              // start of turn: reset AP and charge persistent effects
+              const totalUpkeep = activeEffects.reduce((sum, e) => sum + (Number(e.perTurnCost) || 0), 0);
+              if (currentChar.currentBar < totalUpkeep) {
+                alert(`Not enough Bar to maintain effects (need ${totalUpkeep}). All effects turned off.`);
+                persistEffects([]);
+                setActionPoints(3);
+                return;
+              }
+              const updated = { ...currentChar, currentBar: currentChar.currentBar - totalUpkeep };
+              setCurrentChar(updated);
+              saveCharacter(updated);
+              setActionPoints(3);
+            }}>Take Turn</button>
+
+            {/* Active on Turn */}
+            {activeEffects.length > 0 && (
+              <div style={{ marginTop: '0.75rem', padding: '0.5rem', border: '1px dashed #aaa' }}>
+                <strong>Active on Turn</strong>
+                {activeEffects.map((eff, i) => (
+                  <div key={`eff-${i}`} style={{ marginTop: '0.25rem' }}>
+                    {eff.name} – {eff.perTurnCost} Bar
+                    <button style={{ marginLeft: '0.5rem' }} onClick={() => {
+                      const next = activeEffects.filter((_, idx) => idx !== i);
+                      persistEffects(next);
+                    }}>Turn Off</button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {actionsToShow.map((action, i) => (
               <div key={`${action.name}-${i}`} style={{ marginTop: '0.5rem' }}>
-                {/* Show equipment actions exactly like core actions */}
                 <strong>{action.name}</strong> – {action.barCost} Bar
                 <button
                   onClick={() => {
@@ -361,10 +456,16 @@ export default function App() {
                     if (actionPoints <= 0) { alert('No Action Points left!'); return; }
                     if (currentChar.currentBar < cost) { alert('Not enough Bar!'); return; }
                     const updated = { ...currentChar };
-                    updated.currentBar -= cost; // deduct bar for ALL actions
+                    updated.currentBar -= cost; // upfront cost
                     setCurrentChar(updated);
                     saveCharacter(updated);
                     setActionPoints(prev => prev - 1); // spend an AP
+
+                    // if action has upkeep, toggle it on (if not already present)
+                    if (action.perTurnCost && action.perTurnCost > 0) {
+                      const already = activeEffects.some(e => e.name === action.name);
+                      if (!already) persistEffects([...activeEffects, { name: action.name, perTurnCost: action.perTurnCost }]);
+                    }
                   }}
                   style={{ marginLeft: '1rem' }}
                 >
@@ -401,6 +502,32 @@ export default function App() {
             equipment={equipment}
             setEquipment={persistEquipment}
           />
+        )}
+
+        {screen === 'Devil Fruit' && (
+          <div style={{ marginTop: '0.75rem' }}>
+            <h3>Devil Fruit</h3>
+            {currentChar.fruit ? (
+              <>
+                <div><strong>Name:</strong> {currentChar.fruit.name}</div>
+                {currentChar.fruit.ability && (
+                  <p style={{ marginTop: '0.5rem' }}><em>{currentChar.fruit.ability}</em></p>
+                )}
+                {devilFruitActions.length > 0 && (
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <strong>Starting Actions</strong>
+                    <ul>
+                      {devilFruitActions.map((a, i) => (
+                        <li key={`dfa-${i}`}>{a.name} – {a.barCost} Bar{a.perTurnCost ? ` + ${a.perTurnCost}/turn` : ''}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p>No Devil Fruit.</p>
+            )}
+          </div>
         )}
       </div>
     );
