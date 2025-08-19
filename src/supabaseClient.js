@@ -1,48 +1,53 @@
+// src/supabaseClient.js
 import { createClient } from '@supabase/supabase-js';
 
-/** Reads and cleans env values */
-function cleanEnvString(v) {
-  if (v == null) return '';
-  // Remove non-printable / zero-width characters
-  const cleaned = String(v)
-    .replace(/[^\x20-\x7E]/g, '')   // strip non-ASCII printables (incl. zero-width)
+// -- Sanitize helpers: remove wrapping quotes and stray whitespace
+function clean(val) {
+  return String(val || '')
+    .replace(/^[\'\"\u201C\u201D]+|[\'\"\u201C\u201D]+$/g, '') // strip "smart"/plain quotes
     .trim();
-  return cleaned;
 }
 
-const rawUrl = cleanEnvString(import.meta.env.VITE_SUPABASE_URL);
-const rawKey = cleanEnvString(import.meta.env.VITE_SUPABASE_ANON_KEY);
+const RAW_URL = clean(import.meta.env.VITE_SUPABASE_URL);
+const RAW_KEY = clean(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
-// Helpful debug: print the exact char codes if something weird sneaks in.
-const debugWithCodes = (label, s) =>
-  console.log(label, s, 'length:', s.length, 'codes:', Array.from(s).map(c => c.charCodeAt(0)));
+// Extra safety: allow Vercel envs without VITE_ prefix if you added them there by mistake
+const SUPABASE_URL = RAW_URL || clean(import.meta.env.NEXT_PUBLIC_SUPABASE_URL);
+const SUPABASE_KEY = RAW_KEY || clean(import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
-debugWithCodes('🧪 Raw Supabase URL:', rawUrl);
-debugWithCodes('🧪 Raw Supabase Key (first 6):', rawKey.slice(0, 6) + '…');
-
-// Normalize URL: remove trailing slash(es)
-const supabaseUrl = rawUrl.replace(/\/+$/, '');
-const supabaseAnonKey = rawKey;
-
-// Validate URL shape strictly
-const SUPABASE_HOST_RE = /^https:\/\/[a-z0-9-]+\.supabase\.co$/;
-if (!supabaseUrl || !SUPABASE_HOST_RE.test(supabaseUrl)) {
-  throw new Error(
-    `❌ Invalid VITE_SUPABASE_URL. Got "${supabaseUrl}". ` +
-    `Expected exactly "https://<project>.supabase.co" (no trailing slash/whitespace).`
-  );
-}
-if (!supabaseAnonKey) {
-  throw new Error('❌ VITE_SUPABASE_ANON_KEY missing.');
-}
-
-// Optional: quick health check to surface DNS/blocked egress early in console
+// Validate URL early so we fail loudly & clearly in dev/prod
+let parsedUrl = null;
 try {
-  fetch(`${supabaseUrl}/auth/v1/health`, { method: 'GET' })
-    .then(r => console.log('🔎 Supabase health:', r.ok ? 'OK' : `HTTP ${r.status}`))
-    .catch(err => console.warn('⚠️ Supabase health check failed:', err?.message || err));
+  parsedUrl = new URL(SUPABASE_URL);
 } catch (e) {
-  console.warn('⚠️ Health check threw:', e?.message || e);
+  // eslint-disable-next-line no-console
+  console.error('❌ Supabase URL is invalid after cleaning:', JSON.stringify(SUPABASE_URL));
+  throw e;
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Friendly diagnostics in console
+(function debugLog() {
+  try {
+    const keyPreview = SUPABASE_KEY ? SUPABASE_KEY.slice(0, 6) : '(empty)';
+    // eslint-disable-next-line no-console
+    console.log('%cRaw Supabase URL (cleaned):', 'color:#0aa', SUPABASE_URL, 'len:', SUPABASE_URL.length);
+    // eslint-disable-next-line no-console
+    console.log('%cRaw Supabase Key (first 6):', 'color:#0aa', keyPreview);
+  } catch {}
+})();
+
+// Do a lightweight health check in dev/prod (non-blocking)
+(async () => {
+  try {
+    const res = await fetch(`${parsedUrl.origin}/auth/v1/health`, { mode: 'cors' });
+    // eslint-disable-next-line no-console
+    console.log('%cSupabase health:', 'color:#0a0', res.ok ? 'OK' : `Bad (${res.status})`);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('⚠️ Supabase health check failed:', err?.message || err);
+  }
+})();
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: false },
+});
