@@ -245,21 +245,15 @@ export default function App() {
      Equipment → Actions bridge (useCost only)
   -----------------------------------*/
   const equipmentActions = useMemo(() => {
-    const names = equipment
-      .filter(it => it && it.name && it.name !== '')
-      .map(it => it.name);
-    const distinct = uniqueBy(names, n => n);
-    return distinct.map(n => {
-      const meta = equipmentList.find(e => e.name === n) || {};
-      const cost = Number(meta.useCost) || 0; // default to 0 if not set
-      return {
-        name: `Use ${n}`,
-        barCost: cost,
-        _kind: 'equipment',
-        itemName: n,
-      };
+  return (equipment || [])
+    .filter(it => it && it.name && it.name !== '')
+    .map(it => {
+      const meta = equipmentList.find(e => e.name === it.name) || {};
+      const cost = Number(it.useCost ?? meta.useCost ?? 0) || 0; // ← item.useCost first
+      return { name: `Use ${it.name}`, barCost: cost, _kind: 'equipment', itemName: it.name };
     });
-  }, [equipment]);
+}, [equipment]);
+
 
   /* ----------------------------------
      Devil Fruit → Actions bridge (external JSON)
