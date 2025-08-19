@@ -2,302 +2,241 @@ import React, { useMemo } from 'react';
 import { equipmentList } from './equipmentData';
 
 /**
- * EquipmentSheet
- * - Shows equipment rows with stats
- * - Supports BOTH durability and ammo items
- * - Hides n/a / empty stats
- * - "+ Add Equipment" adds a catalog item
- * - "+ Add Custom" creates a user item with prompts
- *
- * Props
- *  - equipment: Array<EquipItem>
- *  - setEquipment(next: EquipItem[]): void  (also persists in parent)
+ * Small helpers
  */
-export default function EquipmentSheet({ equipment, setEquipment }) {
-  // Fast lookup for catalog meta
-  const catalog = useMemo(() => {
-    const map = new Map();
-    equipmentList.forEach((m) => map.set(m.name, m));
-    return map;
-  }, []);
+const isBlank = (v) => v === undefined || v === null || v === '' || String(v).toLowerCase() === 'n/a';
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-  // Helpers --------------------------------------------------------------
-  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-  const isNA = (v) => v === undefined || v === null || v === '' || String(v).toLowerCase() === 'n/a';
+/** Return a normalized copy of an item row after selecting a catalog item */
+const inflateFromCatalog = (name) => {
+  const meta = equipmentList.find((e) => e.name === name) || {};
+  const hasDur = Number(meta.durability) > 0;
+  const hasAmmo = Number(meta.ammo) > 0;
+  return {
+    name,
+    quantity: 1,
+    isCustom: false,
+    // meta snapshot for rendering
+    damage: meta.damage,
+    range: meta.range,
+    weight: meta.weight,
+    growthTime: meta.growthTime,
+    yield: meta.yield,
+    // usage cost for Actions tab (App.jsx reads this off each item if present)
+    useCost: Number(meta.useCost) || 0,
+    // durability
+    maxDurability: hasDur ? Number(meta.durability) : undefined,
+    currentDurability: hasDur ? Number(meta.durability) : undefined,
+    // ammo
+    maxAmmo: hasAmmo ? Number(meta.ammo) : undefined,
+    currentAmmo: hasAmmo ? Number(meta.ammo) : undefined,
+  };
+};
 
-  const getMeta = (name) => catalog.get(name) || {};
-
-  // Given item + meta, compute the effective fields we should show
-  const shapeItem = (item) => {
-    const meta = getMeta(item.name);
-
-    // Base stats: prefer item overrides, then meta values
-    const damage = item.damage ?? meta.damage;
-    const range = item.range ?? meta.range;
-    const weight = item.weight ?? meta.weight;
-    const description = item.customDesc ?? meta.description;
-    const useCost = item.useCost ?? meta.useCost ?? 0;
-    const growthTime = item.growthTime ?? meta.growthTime; // may be n/a
-    const yieldStat = item.yield ?? meta.yield;
-
-    // Durability: support both legacy meta.durability and item.maxDurability
-    const maxDurability = Number(
-      item.maxDurability ?? meta.durability ?? meta.maxDurability ?? 0
-    ) || 0;
-    const curDurability = Number(
-      item.currentDurability ?? item.durability ?? maxDurability
-    );
-
-    // Ammo: support meta.ammo as max, with item.currentAmmo falling back to max
-    const maxAmmo = Number(item.maxAmmo ?? meta.ammo ?? 0) || 0;
-    const curAmmo = Number(item.currentAmmo ?? (maxAmmo > 0 ? maxAmmo : 0));
-
-    return {
-      meta,
-      damage,
-      range,
-      weight,
-      description,
-      useCost,
-      growthTime,
-      yieldStat,
-      maxDurability,
-      curDurability,
-      maxAmmo,
-      curAmmo,
-    };
+/** Create a custom row from user prompts */
+const makeCustomRow = () => {
+  const name = prompt('Item name?');
+  if (!name) return null;
+  const pNum = (q) => {
+    const v = prompt(q);
+    if (!v) return undefined;
+    if (String(v).trim().toLowerCase() === 'n/a') return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const pTxt = (q) => {
+    const v = prompt(q);
+    if (!v) return undefined;
+    if (String(v).trim().toLowerCase() === 'n/a') return undefined;
+    return v;
   };
 
-  // Mutators ------------------------------------------------------------
-  const updateAt = (idx, patch) => {
-    const next = equipment.map((it, i) => (i === idx ? { ...it, ...patch } : it));
+  const damage = pTxt('Damage (e.g. "2d6" or "Melee + 1d4"), or n/a');
+  const range = pTxt('Range (e.g. "30ft - 60ft" or "Melee range"), or n/a');
+  const weight = pTxt('Weight (light / heavy), or n/a');
+  const durability = pNum('Max Durability (number) or n/a');
+  const ammo = pNum('Max Ammo (number) or n/a');
+  const growthTime = pTxt('Growth time (text) or n/a');
+  const yld = pTxt('Yield (text) or n/a');
+  const useCost = (() => {
+    const v = prompt('Bar usage (number) or n/a');
+    if (!v) return 0;
+    if (String(v).trim().toLowerCase() === 'n/a') return 0;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  })();
+
+  return {
+    name,
+    quantity: 1,
+    isCustom: true,
+    damage,
+    range,
+    weight,
+    growthTime,
+    yield: yld,
+    useCost,
+    maxDurability: durability,
+    currentDurability: durability,
+    maxAmmo: ammo,
+    currentAmmo: ammo,
+  };
+};
+
+const Stat = ({ label, value }) => {
+  if (isBlank(value)) return null;
+  return (
+    <div>
+      <strong>{label}: </strong>{value}
+    </div>
+  );
+};
+
+function Row({ row, onChange, onRemove }) {
+  const catalogOptions = useMemo(() => equipmentList.map((e) => e.name), []);
+  const selectOptions = row.isCustom && row.name && !catalogOptions.includes(row.name)
+    ? [...catalogOptions, row.name]
+    : catalogOptions;
+
+  const update = (patch) => onChange({ ...row, ...patch });
+
+  // Change from dropdown
+  const handleSelect = (e) => {
+    const name = e.target.value;
+    if (!name) return;
+    update(inflateFromCatalog(name));
+  };
+
+  const qtyChange = (e) => {
+    const q = Math.max(0, Number(e.target.value) || 0);
+    if (q === 0) return onRemove();
+    update({ quantity: q });
+  };
+
+  // Durability / Ammo controls
+  const incDur = (d) => {
+    if (!row.maxDurability) return;
+    let cur = clamp((row.currentDurability || 0) + d, 0, row.maxDurability);
+    let qty = row.quantity;
+    if (cur === 0 && d < 0) {
+      // break one item
+      qty = Math.max(0, qty - 1);
+      if (qty === 0) return onRemove();
+      cur = row.maxDurability; // new one
+    }
+    update({ currentDurability: cur, quantity: qty });
+  };
+
+  const incAmmo = (d) => {
+    if (!row.maxAmmo) return;
+    let cur = clamp((row.currentAmmo || 0) + d, 0, row.maxAmmo);
+    update({ currentAmmo: cur });
+  };
+
+  const reload = () => {
+    if (!row.maxAmmo) return;
+    update({ currentAmmo: row.maxAmmo });
+  };
+
+  return (
+    <div style={{ marginBottom: '1rem' }}>
+      {/* Name selector / label */}
+      {row.isCustom ? (
+        <div style={{ fontWeight: 600 }}>{row.name}</div>
+      ) : (
+        <select value={row.name || ''} onChange={handleSelect}>
+          <option value="">-- Select Item --</option>
+          {selectOptions.map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      )}
+
+      {/* Qty */}
+      <span style={{ marginLeft: 10 }}>Qty</span>
+      <input
+        type="number"
+        value={row.quantity || 1}
+        onChange={qtyChange}
+        style={{ width: 60, marginLeft: 6 }}
+      />
+
+      {/* Durability controls (if applicable) */}
+      {row.maxDurability ? (
+        <span style={{ marginLeft: 14 }}>
+          <strong>Durability</strong>{' '}
+          <button onClick={() => incDur(-1)}>-</button>{' '}
+          {row.currentDurability} / {row.maxDurability}{' '}
+          <button onClick={() => incDur(+1)}>+</button>
+        </span>
+      ) : null}
+
+      {/* Ammo controls (if applicable) */}
+      {row.maxAmmo ? (
+        <span style={{ marginLeft: 14 }}>
+          <strong>Ammo</strong>{' '}
+          <button onClick={() => incAmmo(-1)}>-</button>{' '}
+          {row.currentAmmo} / {row.maxAmmo}{' '}
+          <button onClick={() => incAmmo(+1)}>+</button>{' '}
+          <button onClick={reload} style={{ marginLeft: 6 }}>Reload</button>
+        </span>
+      ) : null}
+
+      {/* Stats */}
+      <div style={{ marginTop: 6 }}>
+        <Stat label="Damage" value={row.damage} />
+        <Stat label="Range" value={row.range} />
+        <Stat label="Weight" value={row.weight} />
+        <Stat label="Max Durability" value={row.maxDurability} />
+        <Stat label="Growth time" value={row.growthTime} />
+        <Stat label="Yield" value={row.yield} />
+      </div>
+
+      {!row.isCustom && (
+        <button style={{ marginTop: 6 }} onClick={onRemove}>Remove</button>
+      )}
+    </div>
+  );
+}
+
+export default function EquipmentSheet({ equipment, setEquipment }) {
+  const rows = Array.isArray(equipment) ? equipment : [];
+
+  const addRow = () => {
+    setEquipment([...(rows || []), inflateFromCatalog('')]);
+  };
+
+  const addCustom = () => {
+    const row = makeCustomRow();
+    if (!row) return;
+    setEquipment([...(rows || []), row]);
+  };
+
+  const updateAt = (idx, updated) => {
+    const next = rows.slice();
+    next[idx] = updated;
     setEquipment(next);
   };
 
   const removeAt = (idx) => {
-    const next = equipment.filter((_, i) => i !== idx);
+    const next = rows.slice();
+    next.splice(idx, 1);
     setEquipment(next);
   };
 
-  // When user changes the selected catalog name
-  const onChangeName = (idx, name) => {
-    const meta = getMeta(name);
-    // Reset per-item dynamic state when choosing a new catalog item
-    const withDefaults = {
-      name,
-      // quantity keeps its current value if present, else 1
-      quantity: clamp(Number(equipment[idx]?.quantity || 1), 1, 999),
-      // durability defaults to max if present
-      maxDurability: Number(meta.durability ?? meta.maxDurability ?? 0) || 0,
-      currentDurability: Number(meta.durability ?? meta.maxDurability ?? 0) || 0,
-      // ammo defaults to max if present
-      maxAmmo: Number(meta.ammo ?? 0) || 0,
-      currentAmmo: Number(meta.ammo ?? 0) || 0,
-      damage: meta.damage,
-      range: meta.range,
-      weight: meta.weight,
-      useCost: meta.useCost ?? 0,
-      customDesc: '',
-      growthTime: meta.growthTime,
-      yield: meta.yield,
-    };
-    updateAt(idx, withDefaults);
-  };
-
-  const changeQty = (idx, quantity) => {
-    const q = clamp(Number(quantity || 0), 0, 999);
-    if (q <= 0) return removeAt(idx);
-    updateAt(idx, { quantity: q });
-  };
-
-  // Durability controls
-  const incDurability = (idx, delta) => {
-    const item = equipment[idx];
-    const { maxDurability = 0, currentDurability = 0 } = item;
-    if (maxDurability <= 0) return; // no durability for this item
-
-    let cur = clamp(Number(currentDurability) + delta, 0, Number(maxDurability));
-
-    // If we hit 0 when subtracting, consume one quantity and reset durability if any left
-    if (cur === 0 && delta < 0) {
-      const qty = clamp(Number(item.quantity || 1) - 1, 0, 999);
-      if (qty <= 0) {
-        removeAt(idx);
-        return;
-      } else {
-        updateAt(idx, { quantity: qty, currentDurability: Number(maxDurability) });
-        return;
-      }
-    }
-
-    updateAt(idx, { currentDurability: cur });
-  };
-
-  // Ammo controls
-  const incAmmo = (idx, delta) => {
-    const item = equipment[idx];
-    const { maxAmmo = 0 } = item;
-    if (maxAmmo <= 0) return; // not an ammo item
-    const cur = clamp(Number(item.currentAmmo ?? maxAmmo) + delta, 0, Number(maxAmmo));
-    updateAt(idx, { currentAmmo: cur });
-  };
-
-  const reload = (idx) => {
-    const item = equipment[idx];
-    const { maxAmmo = 0 } = item;
-    if (maxAmmo <= 0) return;
-    updateAt(idx, { currentAmmo: Number(maxAmmo) });
-  };
-
-  // Adders --------------------------------------------------------------
-  const addCatalog = () => {
-    // add a fresh, blank row (user selects name)
-    setEquipment([
-      ...equipment,
-      { name: '', quantity: 1 },
-    ]);
-  };
-
-  const addCustom = () => {
-    const name = prompt('Item name?');
-    if (!name) return;
-
-    const toVal = (label) => {
-      const raw = prompt(label + ' (number or n/a/blank)');
-      if (!raw || raw.toLowerCase() === 'n/a') return undefined;
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : undefined;
-    };
-
-    const damage = prompt('Damage (text, e.g., "2d6" or "Melee + 1d4")') || undefined;
-    const range = prompt('Range (text, e.g., "30ft - 60ft" or "Melee range")') || undefined;
-    const weight = prompt('Weight (light/heavy or text)') || undefined;
-
-    const maxDurability = toVal('Max Durability');
-    const maxAmmo = toVal('Max Ammo');
-    const growthTime = prompt('Growth time (text/number or n/a)') || undefined;
-    const yieldStat = prompt('Yield (text/number or n/a)') || undefined;
-    const useCost = toVal('Bar usage per action') ?? 0;
-
-    setEquipment([
-      ...equipment,
-      {
-        name,
-        quantity: 1,
-        // Stats
-        damage,
-        range,
-        weight,
-        useCost,
-        growthTime,
-        yield: yieldStat,
-        // Durability / ammo
-        maxDurability: Number(maxDurability || 0),
-        currentDurability: Number(maxDurability || 0),
-        maxAmmo: Number(maxAmmo || 0),
-        currentAmmo: Number(maxAmmo || 0),
-        isCustom: true,
-      },
-    ]);
-  };
-
-  // Rendering -----------------------------------------------------------
   return (
     <div>
-      <h3>Equipment</h3>
+      {rows.map((row, i) => (
+        <Row
+          key={i}
+          row={row}
+          onChange={(u) => updateAt(i, u)}
+          onRemove={() => removeAt(i)}
+        />
+      ))}
 
-      {equipment.map((it, idx) => {
-        const shaped = shapeItem(it);
-        const q = Number(it.quantity || 1);
-
-        const showDur = shaped.maxDurability > 0;
-        const showAmmo = shaped.maxAmmo > 0;
-
-        return (
-          <div key={idx} style={{ borderTop: '1px solid #ddd', paddingTop: 10, marginTop: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              {/* Item chooser */}
-              <select
-                value={it.name || ''}
-                onChange={(e) => onChangeName(idx, e.target.value)}
-              >
-                <option value="">-- Select Item --</option>
-                {equipmentList.map((m) => (
-                  <option key={m.name} value={m.name}>{m.name}</option>
-                ))}
-              </select>
-
-              {/* Quantity */}
-              <span>Qty</span>
-              <input
-                style={{ width: 60 }}
-                type="number"
-                min={0}
-                value={q}
-                onChange={(e) => changeQty(idx, e.target.value)}
-              />
-
-              {/* Durability controls (only when supported) */}
-              {showDur && (
-                <>
-                  <span>Durability</span>
-                  <button onClick={() => incDurability(idx, -1)}>-</button>
-                  <span style={{ minWidth: 56, display: 'inline-block', textAlign: 'center' }}>
-                    {shaped.curDurability} / {shaped.maxDurability}
-                  </span>
-                  <button onClick={() => incDurability(idx, +1)}>+</button>
-                </>
-              )}
-
-              {/* Ammo controls (only when supported) */}
-              {showAmmo && (
-                <>
-                  <span>Ammo</span>
-                  <button onClick={() => incAmmo(idx, -1)}>-</button>
-                  <span style={{ minWidth: 56, display: 'inline-block', textAlign: 'center' }}>
-                    {shaped.curAmmo} / {shaped.maxAmmo}
-                  </span>
-                  <button onClick={() => incAmmo(idx, +1)}>+</button>
-                  <button onClick={() => reload(idx)} style={{ marginLeft: 6 }}>Reload</button>
-                </>
-              )}
-
-              <button onClick={() => removeAt(idx)} style={{ marginLeft: 'auto' }}>Remove</button>
-            </div>
-
-            {/* Stats block - hide empty / n/a rows */}
-            <div style={{ marginTop: 6 }}>
-              {!isNA(shaped.damage) && (
-                <div><strong>Damage:</strong> {shaped.damage}</div>
-              )}
-              {!isNA(shaped.range) && (
-                <div><strong>Range:</strong> {shaped.range}</div>
-              )}
-              {!isNA(shaped.weight) && (
-                <div><strong>Weight:</strong> {shaped.weight}</div>
-              )}
-              {showDur && (
-                <div><em>Max Durability:</em> {shaped.maxDurability}</div>
-              )}
-              {showAmmo && (
-                <div><em>Max Ammo:</em> {shaped.maxAmmo}</div>
-              )}
-              {!isNA(shaped.growthTime) && (
-                <div><strong>Growth time:</strong> {shaped.growthTime}</div>
-              )}
-              {!isNA(shaped.yieldStat) && (
-                <div><strong>Yield:</strong> {shaped.yieldStat}</div>
-              )}
-              {!isNA(shaped.description) && (
-                <p style={{ fontStyle: 'italic', marginTop: 6 }}>{shaped.description}</p>
-              )}
-            </div>
-          </div>
-        );
-      })}
-
-      <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-        <button onClick={addCatalog}>+ Add Equipment</button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={addRow}>+ Add Equipment</button>
         <button onClick={addCustom}>+ Add Custom</button>
       </div>
     </div>
