@@ -27,6 +27,14 @@ export default function EquipmentSheet({ equipment, setEquipment }) {
     return next;
   };
 
+  const initAmmoIfNeeded = (slot, meta) => {
+    if (!meta || !meta.ammo) return slot; // no ammo defined
+    const next = { ...slot };
+    if (next.maxAmmo == null) next.maxAmmo = Number(meta.ammo);
+    if (next.ammo == null) next.ammo = Number(meta.ammo);
+    return next;
+  };
+
   const updateSlot = (idx, updater) => {
     const updated = [...equipment];
     const current = updated[idx] || {};
@@ -79,6 +87,33 @@ export default function EquipmentSheet({ equipment, setEquipment }) {
     });
   };
 
+  const adjustAmmo = (idx, delta) => {
+    const slot = equipment[idx];
+    const meta = findMeta(slot.name);
+    if (!meta || !meta.ammo) return; // only for ammo items
+
+    updateSlot(idx, (cur) => {
+      let next = initAmmoIfNeeded(cur, meta);
+      const maxA = Number(next.maxAmmo || meta.ammo || 0);
+      let curA = Number(next.ammo ?? maxA);
+      curA += delta;
+      if (curA > maxA) curA = maxA;
+      if (curA < 0) curA = 0; // does not remove the item
+      return { ...next, ammo: curA };
+    });
+  };
+
+  const reloadAmmo = (idx) => {
+    const slot = equipment[idx];
+    const meta = findMeta(slot.name);
+    if (!meta || !meta.ammo) return;
+    updateSlot(idx, (cur) => {
+      const next = initAmmoIfNeeded(cur, meta);
+      const maxA = Number(next.maxAmmo || meta.ammo || 0);
+      return { ...next, ammo: maxA };
+    });
+  };
+
   const onSelectName = (idx, name) => {
     updateSlot(idx, (cur) => {
       const base = { ...cur, name };
@@ -91,6 +126,13 @@ export default function EquipmentSheet({ equipment, setEquipment }) {
         // clear durability fields for non-durable items
         delete base.maxDurability;
         delete base.durability;
+      }
+      if (meta && meta.ammo) {
+        base.maxAmmo = Number(meta.ammo);
+        base.ammo = Number(meta.ammo);
+      } else {
+        delete base.maxAmmo;
+        delete base.ammo;
       }
       if (base.quantity == null || base.quantity === '') base.quantity = 1;
       return base;
