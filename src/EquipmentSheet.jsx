@@ -1,215 +1,154 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { equipmentList } from './equipmentData';
 
 /**
  * EquipmentSheet
- * - Displays and edits a character's equipment
- * - Adds durability controls for items that have a durability stat
- * - Durability logic:
- *    - When an item with durability is added/selected, it initializes to maxDurability
- *    - "-" reduces current durability by 1
- *       - If it hits 0: quantity is reduced by 1
- *       - If quantity stays > 0: durability resets to maxDurability
- *       - If quantity becomes 0: the item is removed
- *    - "+" increases current durability up to maxDurability
- * - Items without a durability stat (e.g., guns with Ammo) are not affected here
+ * - Shows one editable equipment slot at a time (like before)
+ * - Adds Durability controls for items that define `durability`
+ * - Adds Ammo controls + Reload for items that define `ammo`
+ * - On durability reaching 0: decrease quantity; if qty>0 reset currentDurability to max; if qty hits 0, remove row
+ * - Ammo reaching 0 does NOT remove; player may Reload to max
  */
 export default function EquipmentSheet({ equipment, setEquipment }) {
-  const allNames = useMemo(() => equipmentList.map(e => e.name), []);
+  // Local projection of a single editable row (index 0)
+  const items = useMemo(() => equipmentList.map(e => e.name), []);
+  const [rowIndex] = useState(0);
 
-  const findMeta = (name) => equipmentList.find(e => e.name === name) || null;
+  // Ensure at least one row exists
+  const rows = equipment && equipment.length ? equipment : [{ name: '', quantity: 1 }];
+  const row = rows[rowIndex] || { name: '', quantity: 1 };
 
-  const initDurabilityIfNeeded = (slot, meta) => {
-    if (!meta || !meta.durability) return slot; // no durability defined
-    const next = { ...slot };
-    if (next.maxDurability == null) next.maxDurability = Number(meta.durability);
-    if (next.durability == null) next.durability = Number(meta.durability);
-    return next;
-  };
+  const meta = useMemo(() => equipmentList.find(e => e.name === row.name) || {}, [row.name]);
+  const maxDur = Number(meta.durability) || 0;
+  const maxAmmo = Number(meta.ammo) || 0;
 
-  const initAmmoIfNeeded = (slot, meta) => {
-    if (!meta || !meta.ammo) return slot; // no ammo defined
-    const next = { ...slot };
-    if (next.maxAmmo == null) next.maxAmmo = Number(meta.ammo);
-    if (next.ammo == null) next.ammo = Number(meta.ammo);
-    return next;
-  };
-
-  const updateSlot = (idx, updater) => {
-    const updated = [...equipment];
-    const current = updated[idx] || {};
-    updated[idx] = typeof updater === 'function' ? updater(current) : { ...current, ...updater };
-    // Auto-remove if name cleared or quantity 0
-    if (!updated[idx].name || Number(updated[idx].quantity) <= 0) {
-      updated.splice(idx, 1);
+  const ensureDefaults = (obj, m) => {
+    const next = { ...obj };
+    if (m && m.durability && (next.currentDurability == null || next.name !== obj.name)) {
+      next.currentDurability = Number(m.durability);
     }
-    setEquipment(updated);
+    if (m && m.ammo && (next.currentAmmo == null || next.name !== obj.name)) {
+      next.currentAmmo = Number(m.ammo);
+    }
+    return next;
   };
 
-  const addSlot = () => {
-    setEquipment([
-      ...equipment,
-      { name: '', quantity: 1, customDesc: '' }
-    ]);
+  const updateRow = (patch) => {
+    const next = [...rows];
+    next[rowIndex] = ensureDefaults({ ...row, ...patch }, meta);
+    setEquipment(next);
   };
 
-  const removeSlot = (idx) => {
-    const updated = equipment.slice();
-    updated.splice(idx, 1);
-    setEquipment(updated);
+  const removeRow = () => {
+    const next = [...rows];
+    next.splice(rowIndex, 1);
+    setEquipment(next);
   };
 
-  const adjustDurability = (idx, delta) => {
-    const slot = equipment[idx];
-    const meta = findMeta(slot.name);
-    if (!meta || !meta.durability) return; // only for durable items
+  const addAnother = () => {
+    const next = [...rows, { name: '', quantity: 1 }];
+    setEquipment(next);
+  };
 
-    updateSlot(idx, (cur) => {
-      let next = initDurabilityIfNeeded(cur, meta);
-      const maxD = Number(next.maxDurability || meta.durability || 0);
-      let curD = Number(next.durability ?? maxD);
-      curD += delta;
+  // Quantity change
+  const onQtyChange = (qtyStr) => {
+    const q = Math.max(0, Number(qtyStr) || 0);
+    if (q === 0) return removeRow();
+    updateRow({ quantity: q });
+  };
 
-      if (curD > maxD) curD = maxD;
+  // Durability +/-
+  const changeDurability = (delta) => {
+    if (!maxDur) return;
+    let cur = Math.max(0, Math.min(maxDur, Number(row.currentDurability ?? maxDur)) + delta);
 
-      if (curD <= 0) {
-        // break: reduce quantity
-        const q = Math.max(0, Number(next.quantity || 0) - 1);
-        if (q <= 0) {
-          // handled by updateSlot auto-remove, set quantity to 0 to trigger removal
-          return { ...next, quantity: 0 };
-        }
-        // reset durability and keep item
-        return { ...next, quantity: q, durability: maxD };
+    // broke item
+    if (cur <= 0) {
+      const newQty = Math.max(0, (row.quantity || 1) - 1);
+      if (newQty <= 0) {
+        removeRow();
+        return;
       }
-
-      return { ...next, durability: curD };
-    });
+      // reset durability for next piece
+      updateRow({ quantity: newQty, currentDurability: maxDur });
+      return;
+    }
+    updateRow({ currentDurability: cur });
   };
 
-  const adjustAmmo = (idx, delta) => {
-    const slot = equipment[idx];
-    const meta = findMeta(slot.name);
-    if (!meta || !meta.ammo) return; // only for ammo items
-
-    updateSlot(idx, (cur) => {
-      let next = initAmmoIfNeeded(cur, meta);
-      const maxA = Number(next.maxAmmo || meta.ammo || 0);
-      let curA = Number(next.ammo ?? maxA);
-      curA += delta;
-      if (curA > maxA) curA = maxA;
-      if (curA < 0) curA = 0; // does not remove the item
-      return { ...next, ammo: curA };
-    });
+  // Ammo +/- and Reload
+  const changeAmmo = (delta) => {
+    if (!maxAmmo) return;
+    const cur = Math.max(0, Math.min(maxAmmo, Number(row.currentAmmo ?? maxAmmo) + delta));
+    updateRow({ currentAmmo: cur });
+  };
+  const reload = () => {
+    if (!maxAmmo) return;
+    updateRow({ currentAmmo: maxAmmo });
   };
 
-  const reloadAmmo = (idx) => {
-    const slot = equipment[idx];
-    const meta = findMeta(slot.name);
-    if (!meta || !meta.ammo) return;
-    updateSlot(idx, (cur) => {
-      const next = initAmmoIfNeeded(cur, meta);
-      const maxA = Number(next.maxAmmo || meta.ammo || 0);
-      return { ...next, ammo: maxA };
-    });
-  };
-
-  const onSelectName = (idx, name) => {
-    updateSlot(idx, (cur) => {
-      const base = { ...cur, name };
-      const meta = findMeta(name);
-      if (meta && meta.durability) {
-        // initialize durability fields for durable items
-        base.maxDurability = Number(meta.durability);
-        base.durability = Number(meta.durability);
-      } else {
-        // clear durability fields for non-durable items
-        delete base.maxDurability;
-        delete base.durability;
-      }
-      if (meta && meta.ammo) {
-        base.maxAmmo = Number(meta.ammo);
-        base.ammo = Number(meta.ammo);
-      } else {
-        delete base.maxAmmo;
-        delete base.ammo;
-      }
-      if (base.quantity == null || base.quantity === '') base.quantity = 1;
-      return base;
-    });
-  };
-
-  const onChangeQty = (idx, qtyStr) => {
-    const qty = Math.max(0, Number(qtyStr || 0));
-    updateSlot(idx, (cur) => {
-      if (qty <= 0) return { ...cur, quantity: 0 }; // triggers removal
-      return { ...cur, quantity: qty };
-    });
+  const onNameChange = (e) => {
+    const name = e.target.value;
+    const m = equipmentList.find(x => x.name === name) || {};
+    // Reset currentDurability / currentAmmo to max when choosing an item
+    updateRow({ name, currentDurability: m.durability || undefined, currentAmmo: m.ammo || undefined });
   };
 
   return (
-    <div>
+    <div style={{ marginTop: '0.75rem' }}>
       <h3>Equipment</h3>
 
-      {equipment.map((slot, idx) => {
-        const meta = findMeta(slot.name);
-        const hasDurability = Boolean(meta && meta.durability && Number(meta.durability) > 0);
-        const quantity = Number(slot.quantity || 1);
-        const curD = hasDurability ? (slot.durability ?? meta.durability) : null;
-        const maxD = hasDurability ? (slot.maxDurability ?? meta.durability) : null;
+      {/* Row controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <select value={row.name || ''} onChange={onNameChange} style={{ minWidth: 200 }}>
+          <option value="">-- Select Item --</option>
+          {items.map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+        <span>Qty</span>
+        <input style={{ width: 60 }} type="number" value={row.quantity || 1} onChange={(e) => onQtyChange(e.target.value)} />
 
-        return (
-          <div key={`eq-${idx}`} style={{ borderTop: '1px solid #ddd', paddingTop: '0.75rem', marginTop: '0.75rem' }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select value={slot.name || ''} onChange={(e) => onSelectName(idx, e.target.value)}>
-                <option value=''>-- Select Item --</option>
-                {allNames.map(n => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
+        {/* Durability controls (only when item has durability) */}
+        {maxDur > 0 && (
+          <>
+            <span style={{ marginLeft: 8 }}>Durability</span>
+            <button onClick={() => changeDurability(-1)}>-</button>
+            <span style={{ padding: '0 6px' }}>{Math.min(maxDur, Number(row.currentDurability ?? maxDur))} / {maxDur}</span>
+            <button onClick={() => changeDurability(+1)}>+</button>
+          </>
+        )}
 
-              <label>
-                Qty&nbsp;
-                <input
-                  type='number'
-                  min={0}
-                  value={quantity}
-                  onChange={(e) => onChangeQty(idx, e.target.value)}
-                  style={{ width: 64 }}
-                />
-              </label>
+        {/* Ammo controls (only when item has ammo) */}
+        {maxAmmo > 0 && (
+          <>
+            <span style={{ marginLeft: 12 }}>Ammo</span>
+            <button onClick={() => changeAmmo(-1)}>-</button>
+            <span style={{ padding: '0 6px' }}>{Math.min(maxAmmo, Number(row.currentAmmo ?? maxAmmo))} / {maxAmmo}</span>
+            <button onClick={() => changeAmmo(+1)}>+</button>
+            <button onClick={reload} style={{ marginLeft: 8 }}>Reload</button>
+          </>
+        )}
 
-              {/* Durability controls only for items that have durability */}
-              {hasDurability && (
-                <div>
-                  <span style={{ marginRight: 6 }}>Durability</span>
-                  <button onClick={() => adjustDurability(idx, -1)}>-</button>
-                  <span style={{ margin: '0 6px' }}>{curD} / {maxD}</span>
-                  <button onClick={() => adjustDurability(idx, +1)}>+</button>
-                </div>
-              )}
+        <button onClick={removeRow} style={{ marginLeft: 'auto' }}>Remove</button>
+      </div>
 
-              <button style={{ marginLeft: 'auto' }} onClick={() => removeSlot(idx)}>Remove</button>
-            </div>
+      {/* Item details */}
+      {row.name && (
+        <div style={{ marginTop: 8 }}>
+          {meta.damage && (<div><strong>Damage:</strong> {meta.damage}</div>)}
+          {meta.range && (<div><strong>Range:</strong> {meta.range}</div>)}
+          {maxDur > 0 && (<div><strong>Max Durability:</strong> {maxDur}</div>)}
+          {maxAmmo > 0 && (<div><strong>Max Ammo:</strong> {maxAmmo}</div>)}
+          {meta.weight && (<div><strong>Weight:</strong> {meta.weight}</div>)}
+          {meta.description && (
+            <p style={{ fontStyle: 'italic', marginTop: 6 }}>{meta.description}</p>
+          )}
+        </div>
+      )}
 
-            {/* Basic readout of item stats for convenience */}
-            {meta && (
-              <div style={{ marginTop: 6 }}>
-                {meta.damage && <div><strong>Damage:</strong> {meta.damage}</div>}
-                {meta.range && <div><strong>Range:</strong> {meta.range}</div>}
-                {hasDurability && <div><strong>Max Durability:</strong> {maxD}</div>}
-                {meta.weight && <div><strong>Weight:</strong> {meta.weight}</div>}
-                {meta.description && (
-                  <div style={{ marginTop: 4, fontStyle: 'italic' }}>{meta.description}</div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      <div style={{ marginTop: '0.75rem' }}>
-        <button onClick={addSlot}>+ Add Equipment</button>
+      <div style={{ marginTop: 12 }}>
+        <button onClick={addAnother}>+ Add Equipment</button>
       </div>
     </div>
   );
