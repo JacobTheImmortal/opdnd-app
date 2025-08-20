@@ -8,27 +8,54 @@ export const races = {
     runSpeed: 30,
     sp: 4
   },
+  HumanCyborgVariant: {
+    description: "+1 starting point Str+1 Con+1 Start with Monentary Repair.",
+    bonuses: {str: 1, con: 1, dex: -1, wis: -1},
+    hp: 22,
+    bar: 90,
+    reflex: 5,
+    runSpeed: 30,
+    sp: 4
+  },
+  HumanHalfBuccaneer: {
+    description: "Starting Health 30. Starting Bar 85. +1 starting point",
+    bonuses: {},
+    hp: 30,
+    bar: 85,
+    reflex: 5,
+    runSpeed: 30,
+    sp: 4
+  },
   Fishman: {
-    description: "Swim speed 60ft, can breathe underwater, +3 STR, +1 CON, +1 DEX, -1 WIS",
-    bonuses: { str: 3, con: 1, dex: 1, wis: -1 },
+    description: "+Swim speed 60ft, +can breathe underwater, +Speak with Fish, -Run Slower on Land",
+    bonuses: { con: 1, wis: -1 },
     hp: 22,
     bar: 100,
     reflex: 6,
-    runSpeed: 30,
+    runSpeed: 20,
+    sp: 3
+  },
+  AnglerFishman: {
+    description: "+Swim speed 60ft, +can breathe underwater, +Speak with Fish, -Run Slower on Land, +Start with Light, +Darkvision",
+    bonuses: { con: 1, wis: -1 },
+    hp: 22,
+    bar: 100,
+    reflex: 6,
+    runSpeed: 20,
     sp: 3
   },
   SharkFishman: {
-    description: "Same as Fishman with enhanced bite and combat traits",
-    bonuses: { str: 4, con: 2, dex: 1, wis: -1 },
-    hp: 24,
+    description: "+Swim speed 60ft, +can breathe underwater, +Speak with Fish, -Run Slower on Land, Str+4, Starting Health 30",
+    bonuses: { str: 4,wis: -4 },
+    hp: 30,
     bar: 100,
     reflex: 6,
-    runSpeed: 30,
+    runSpeed: 20,
     sp: 3
   },
   Mink: {
-    description: "Electro Punch trait. High reflex and speed. STR+1, DEX+2, WIS+1",
-    bonuses: { str: 1, dex: 2, wis: 1 },
+    description: "Electro Punch trait. High reflex and speed. STR+1, CON-2, DEX+2, WIS+1",
+    bonuses: { str: 1, con: -2, dex: 2, wis: 1 },
     hp: 20,
     bar: 100,
     reflex: 7,
@@ -36,48 +63,39 @@ export const races = {
     sp: 3
   },
   Skypiean: {
-    description: "Inhabitants of sky islands. DEX+1, INT+2, WIS+1, CON-1",
-    bonuses: { dex: 1, int: 2, wis: 1, con: -1 },
+    description: "Inhabitants of sky islands. DEX+1, INT+1, WIS+1, CON-2",
+    bonuses: { dex: 1, int: 1, wis: 1, con: -2 },
     hp: 18,
     bar: 110,
     reflex: 6,
     runSpeed: 30,
     sp: 3
   },
-  Shandian: {
-    description: "Skypiean subrace. Better strength and mobility. STR+2, DEX+1, WIS+1, CON-1",
-    bonuses: { str: 2, dex: 1, wis: 1, con: -1 },
+  Shendorians: {
+    description: "+starting point 1 +Jump distance Double +Infinite Breath Holding +5 Bar",
+    bonuses: {},
     hp: 19,
-    bar: 110,
+    bar: 105,
     reflex: 6,
     runSpeed: 30,
-    sp: 3
+    sp: 4
   },
-  Birkian: {
-    description: "Winged skyfolk. INT+1, WIS+2, DEX+1, STR-1",
-    bonuses: { int: 1, wis: 2, dex: 1, str: -1 },
-    hp: 18,
+  Berkin: {
+    description: "+Jump distance Double +Infinite Breath Holding +15 Bar",
+    bonuses: { },
+    hp: 19,
     bar: 115,
     reflex: 6,
     runSpeed: 30,
     sp: 3
   },
   ThreeEye: {
-    description: "Rare race that can awaken the Voice of All Things. INT+3, WIS+2, CHA-1",
-    bonuses: { int: 3, wis: 2, cha: -1 },
+    description: "Rare race that can awaken the Voice of All Things. INT+3, WIS+1, CHA-2",
+    bonuses: { int: 3, wis: 1, cha: -2 },
     hp: 18,
     bar: 100,
     reflex: 5,
     runSpeed: 30,
-    sp: 3
-  },
-  Dwarf: {
-    description: "Tiny and fast. Jumping masters. STR+1, DEX+2, INT+1, WIS-1",
-    bonuses: { str: 1, dex: 2, int: 1, wis: -1 },
-    hp: 16,
-    bar: 100,
-    reflex: 7,
-    runSpeed: 40,
     sp: 3
   },
   Giant: {
@@ -95,16 +113,16 @@ export const races = {
     hp: 16,
     bar: 100,
     reflex: 8,
-    runSpeed: 70,
+    runSpeed: 60,
     sp: 3
   },
-  Lunarian: {
-    description: "Can ignite flames. Fire resistance. STR+2, CON+2, CHA-1",
-    bonuses: { str: 2, con: 2, cha: -1 },
-    hp: 24,
-    bar: 100,
+  HumanHalfLunarian: {
+    description: "+Fire resistance, +2 starting point, +Advantage History, -Starting Bar 80, CHA-2",
+    bonuses: { cha: -2 },
+    hp: 20,
+    bar: 80,
     reflex: 5,
     runSpeed: 30,
-    sp: 3
+    sp: 5
   }
 };
