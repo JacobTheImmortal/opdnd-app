@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabaseClient';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
@@ -168,6 +168,9 @@ export default function App() {
       equipment: [],
       activeEffects: [],
       skills: [],
+      // Melee display can be overridden later by DM:
+      meleeText: null,   // e.g., "1d8" or "2d4"
+      meleeBonus: null,  // number
     };
     setCharList(prev => [...prev, char]);
     setCurrentChar(char);
@@ -245,15 +248,14 @@ export default function App() {
      Equipment → Actions bridge (useCost only)
   -----------------------------------*/
   const equipmentActions = useMemo(() => {
-  return (equipment || [])
-    .filter(it => it && it.name && it.name !== '')
-    .map(it => {
-      const meta = equipmentList.find(e => e.name === it.name) || {};
-      const cost = Number(it.useCost ?? meta.useCost ?? 0) || 0; // ← item.useCost first
-      return { name: `Use ${it.name}`, barCost: cost, _kind: 'equipment', itemName: it.name };
-    });
-}, [equipment]);
-
+    return (equipment || [])
+      .filter(it => it && it.name && it.name !== '')
+      .map(it => {
+        const meta = equipmentList.find(e => e.name === it.name) || {};
+        const cost = Number(it.useCost ?? meta.useCost ?? 0) || 0;
+        return { name: `Use ${it.name}`, barCost: cost, _kind: 'equipment', itemName: it.name };
+      });
+  }, [equipment]);
 
   /* ----------------------------------
      Devil Fruit → Actions bridge (external JSON)
@@ -308,6 +310,8 @@ export default function App() {
 
   const adminLevelAdjust = async (char, delta) => {
     const updated = { ...char, level: Math.max(1, (char.level || 1) + delta) };
+    // SP ± 3 per level change
+    updated.sp = Math.max(0, (updated.sp || 0) + (delta * 3));
     const derived = recalcDerived(updated);
     Object.assign(updated, derived);
     updated.currentHp = Math.min(updated.currentHp ?? derived.hp, derived.hp);
@@ -315,6 +319,7 @@ export default function App() {
     const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
     if (error) { alert('Level change failed.'); return; }
     setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    if (currentChar?.id === updated.id) setCurrentChar(updated);
   };
 
   const adminModifyFruit = async (char) => {
@@ -334,36 +339,176 @@ export default function App() {
     const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
     if (error) { alert('Update failed.'); return; }
     setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    if (currentChar?.id === updated.id) setCurrentChar(updated);
+  };
+
+  // DM editor helpers
+  const dmAdjustNumber = async (char, field, delta, min = 0) => {
+    const updated = { ...char, [field]: Math.max(min, (char[field] || 0) + delta) };
+    // keep current values within caps
+    if (field === 'hp') updated.currentHp = Math.min(updated.currentHp ?? updated.hp, updated.hp);
+    if (field === 'bar') updated.currentBar = Math.min(updated.currentBar ?? updated.bar, updated.bar);
+    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
+    if (error) { alert('Update failed.'); return; }
+    setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    if (currentChar?.id === updated.id) setCurrentChar(updated);
+  };
+
+  // change melee dice text / bonus
+  const dmSaveMelee = async (char, diceText, bonusNumber) => {
+    const updated = { ...char, meleeText: diceText || null, meleeBonus: Number(bonusNumber) || 0 };
+    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
+    if (error) { alert('Update failed.'); return; }
+    setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    if (currentChar?.id === updated.id) setCurrentChar(updated);
+  };
+
+  // adjust a stat by ±2 (to change its modifier by ±1)
+  const dmAdjustStatMod = async (char, statKey, deltaMod) => {
+    const updated = { ...char, stats: { ...char.stats } };
+    updated.stats[statKey] = Math.max(1, (updated.stats[statKey] || 10) + (deltaMod * 2));
+    const derived = recalcDerived(updated);
+    Object.assign(updated, derived);
+    updated.currentHp = Math.min(updated.currentHp ?? derived.hp, derived.hp);
+    updated.currentBar = Math.min(updated.currentBar ?? derived.bar, derived.bar);
+    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
+    if (error) { alert('Update failed.'); return; }
+    setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    if (currentChar?.id === updated.id) setCurrentChar(updated);
+  };
+
+  const dmAdjustSP = async (char, delta) => {
+    const updated = { ...char, sp: Math.max(0, (char.sp || 0) + delta) };
+    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
+    if (error) { alert('Update failed.'); return; }
+    setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    if (currentChar?.id === updated.id) setCurrentChar(updated);
   };
 
   /* ----------------------------------
      Renders
   -----------------------------------*/
-  // Overview page (moved to separate component)
+  // Overview page
   if (step === 0) {
     return <Overview onBack={() => setStep(1)} />;
   }
 
   // DM / DevTools page
   if (step === 3) {
+    const [expandedId, setExpandedId] = useState(null);
+    const [meleeInputs, setMeleeInputs] = useState({}); // { [charId]: { diceText, bonus } }
+
+    const getMeleeFor = (char) => {
+      const dice = char.meleeText || '1d6';
+      const bonus = (typeof char.meleeBonus === 'number')
+        ? char.meleeBonus
+        : Math.floor(((char.stats?.str ?? 10) - 10) / 2);
+      return { dice, bonus };
+    };
+
     return (
       <div style={{ padding: '1rem' }}>
         <button onClick={() => setStep(1)}>← Back</button>
         <h1>Dungeon Master Tools</h1>
         <p style={{ color: '#666' }}>Administer characters below.</p>
-        <ul>
-          {charList.map((char) => (
-            <li key={char.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem' }}>
-              <span style={{ minWidth: '280px' }}>{char.name} ({char.race})</span>
-              <button onClick={() => adminDelete(char)} style={{ background: '#fde7e7' }}>Delete</button>
-              <button onClick={() => adminCopy(char)}>Copy</button>
-              <span>
-                <button onClick={() => adminLevelAdjust(char, +1)}>Lvl +</button>
-                <button onClick={() => adminLevelAdjust(char, -1)} style={{ marginLeft: '0.25rem' }}>Lvl -</button>
-              </span>
-              <button onClick={() => adminModifyFruit(char)}>Modify DevilFruit</button>
-            </li>
-          ))}
+
+        <ul style={{ listStyle: 'none', padding: 0 }}>
+          {charList.map((char) => {
+            const { dice, bonus } = getMeleeFor(char);
+            const mods = {
+              cha: Math.floor(((char.stats?.cha ?? 10) - 10) / 2),
+              con: Math.floor(((char.stats?.con ?? 10) - 10) / 2),
+              dex: Math.floor(((char.stats?.dex ?? 10) - 10) / 2),
+              int: Math.floor(((char.stats?.int ?? 10) - 10) / 2),
+              str: Math.floor(((char.stats?.str ?? 10) - 10) / 2),
+              wis: Math.floor(((char.stats?.wis ?? 10) - 10) / 2),
+            };
+            const local = meleeInputs[char.id] || { diceText: dice, bonus };
+
+            return (
+              <li key={char.id} style={{ marginBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => setExpandedId(expandedId === char.id ? null : char.id)}
+                    style={{ fontWeight: 600 }}
+                  >
+                    {char.name} ({char.race}) (Lvl {char.level})
+                  </button>
+
+                  <button onClick={() => adminDelete(char)} style={{ background: '#fde7e7' }}>Delete</button>
+                  <button onClick={() => adminCopy(char)}>Copy</button>
+                  <button onClick={() => adminLevelAdjust(char, +1)}>Lvl +</button>
+                  <button onClick={() => adminLevelAdjust(char, -1)}>Lvl -</button>
+                  <button onClick={() => dmAdjustSP(char, +1)}>SP +</button>
+                  <button onClick={() => dmAdjustSP(char, -1)}>SP -</button>
+                  <button onClick={() => adminModifyFruit(char)}>Modify DevilFruit</button>
+                </div>
+
+                {expandedId === char.id && (
+                  <div style={{ marginTop: '0.5rem', padding: '0.5rem 0.75rem', border: '1px solid #ddd' }}>
+                    {/* Row 1: core derived stats */}
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <strong>Max Health:</strong> {char.hp}
+                      <button onClick={() => dmAdjustNumber(char, 'hp', +1)}>+</button>
+                      <button onClick={() => dmAdjustNumber(char, 'hp', -1)}>−</button>
+
+                      <strong style={{ marginLeft: '1rem' }}>Max Bar:</strong> {char.bar}
+                      <button onClick={() => dmAdjustNumber(char, 'bar', +1)}>+</button>
+                      <button onClick={() => dmAdjustNumber(char, 'bar', -1)}>−</button>
+
+                      <strong style={{ marginLeft: '1rem' }}>Reflex:</strong> {char.reflex}
+                      <button onClick={() => dmAdjustNumber(char, 'reflex', +1)}>+</button>
+                      <button onClick={() => dmAdjustNumber(char, 'reflex', -1)}>−</button>
+                    </div>
+
+                    {/* Row 2: Melee */}
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <strong>Melee:</strong>{' '}
+                      <span style={{ marginRight: 8 }}>
+                        {(local.diceText || dice)} + {local.bonus}
+                      </span>
+                      <input
+                        style={{ width: 70, marginRight: 6 }}
+                        placeholder="dice"
+                        value={local.diceText}
+                        onChange={e =>
+                          setMeleeInputs(prev => ({ ...prev, [char.id]: { ...local, diceText: e.target.value } }))
+                        }
+                      />
+                      <input
+                        type="number"
+                        style={{ width: 60, marginRight: 6 }}
+                        placeholder="bonus"
+                        value={local.bonus}
+                        onChange={e =>
+                          setMeleeInputs(prev => ({ ...prev, [char.id]: { ...local, bonus: Number(e.target.value) } }))
+                        }
+                      />
+                      <button onClick={() => dmSaveMelee(char, local.diceText, local.bonus)}>Save</button>
+                    </div>
+
+                    {/* Row 3: Main stat modifiers (adjust underlying stats by ±2) */}
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <strong>Main Modifiers:</strong>
+                      {(['cha','con','dex','int','str','wis']).map(sk => (
+                        <span key={sk} style={{ marginLeft: '0.75rem' }}>
+                          {sk.toUpperCase()}: {mods[sk]}{' '}
+                          <button onClick={() => dmAdjustStatMod(char, sk, +1)}>+</button>
+                          <button onClick={() => dmAdjustStatMod(char, sk, -1)}>−</button>
+                        </span>
+                      ))}
+                    </div>
+
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <strong>Skill Points:</strong> {char.sp}
+                      <button onClick={() => dmAdjustSP(char, +1)} style={{ marginLeft: 6 }}>+</button>
+                      <button onClick={() => dmAdjustSP(char, -1)}>−</button>
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </div>
     );
@@ -387,6 +532,11 @@ export default function App() {
 
   // Character sheet
   if (step === 4 && currentChar) {
+    const meleeDice = currentChar.meleeText || '1d6';
+    const meleeBonus = (typeof currentChar.meleeBonus === 'number')
+      ? currentChar.meleeBonus
+      : Math.floor(((currentChar.stats?.str ?? 10) - 10) / 2);
+
     return (
       <div style={{ padding: '1rem' }}>
         {/* Back clears the open session */}
@@ -399,7 +549,7 @@ export default function App() {
           <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} |{' '}
           <strong>Bar:</strong> {currentChar.currentBar} / {currentChar.bar} |{' '}
           <strong>Reflex:</strong> {currentChar.reflex} |{' '}
-          <strong>Melee:</strong> 1d6 + {Math.floor((currentChar.stats?.str - 10) / 2)}
+          <strong>Melee:</strong> {meleeDice} + {meleeBonus}
         </p>
 
         <button onClick={levelUp}>Level Up (+3 SP & full restore)</button>
@@ -430,7 +580,13 @@ export default function App() {
 
             <h4>Health Management</h4>
             <p>Current HP: {currentChar.currentHp} / {currentChar.hp}</p>
-            <input type="number" value={damageAmount} onChange={e => setDamageAmount(Number(e.target.value))} placeholder="Amount" style={{ width: '60px' }} />
+            <input
+              type="number"
+              value={damageAmount}
+              onChange={e => setDamageAmount(Number(e.target.value))}
+              placeholder="Amount"
+              style={{ width: '60px' }}
+            />
             <button onClick={() => {
               const updated = { ...currentChar };
               updated.currentHp = applyDamage(updated.currentHp, damageAmount);
@@ -446,7 +602,13 @@ export default function App() {
 
             <h4>Bar Management</h4>
             <p>Current Bar: {currentChar.currentBar} / {currentChar.bar}</p>
-            <input type="number" value={barAmount} onChange={e => setBarAmount(Number(e.target.value))} placeholder="Amount" style={{ width: '60px' }} />
+            <input
+              type="number"
+              value={barAmount}
+              onChange={e => setBarAmount(Number(e.target.value))}
+              placeholder="Amount"
+              style={{ width: '60px' }}
+            />
             <button onClick={() => {
               const updated = { ...currentChar };
               updated.currentBar = spendBar(updated.currentBar, barAmount);
