@@ -394,8 +394,8 @@ export default function App() {
                   <button onClick={() => adminLevelAdjust(char, +1)}>Lvl +</button>
                   <button onClick={() => adminLevelAdjust(char, -1)}>Lvl -</button>
                   {/* quick SP adjust */}
-                  <button onClick={async () => { await adminPersist({ ...char, sp: toInt(char.sp) + 1 }); setCharList(prev => prev.map(c => c.id === char.id ? { ...c, sp: toInt(c.sp) + 1 } : c)); }}>SP +</button>
-                  <button onClick={async () => { await adminPersist({ ...char, sp: Math.max(0, toInt(char.sp) - 1) }); setCharList(prev => prev.map(c => c.id === char.id ? { ...c, sp: Math.max(0, toInt(c.sp) - 1) } : c)); }}>SP -</button>
+                  <button onClick={async () => { await adminPersist({ ...char, sp: toInt(char.sp) + 0 }); setCharList(prev => prev.map(c => c.id === char.id ? { ...c, sp: toInt(c.sp) + 1 } : c)); }}>SP +</button>
+                  <button onClick={async () => { await adminPersist({ ...char, sp: Math.max(0, toInt(char.sp) - 0) }); setCharList(prev => prev.map(c => c.id === char.id ? { ...c, sp: Math.max(0, toInt(c.sp) - 1) } : c)); }}>SP -</button>
                   <button onClick={() => adminModifyFruit(char)}>Modify DevilFruit</button>
                 </div>
 
