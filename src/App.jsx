@@ -10,6 +10,7 @@ import { equipmentList } from "./equipmentData";
 import { getFruitActions } from "./devilFruitActions";
 import Overview from "./Overview";
 
+
 /* ----------------------------------
    Small helpers
 -----------------------------------*/
