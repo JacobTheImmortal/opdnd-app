@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabaseClient';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
@@ -11,13 +11,11 @@ import { getFruitActions } from './devilFruitActions';
 import Overview from './Overview';
 
 /* ----------------------------------
-   Helpers
+   Helpers & utilities
 -----------------------------------*/
 async function saveCharacter(character) {
   if (!character || !character.id) return;
-  const { error } = await supabase
-    .from('characters')
-    .upsert({ id: character.id, data: character });
+  const { error } = await supabase.from('characters').upsert({ id: character.id, data: character });
   if (error) console.error('❌ Error saving character:', error);
 }
 
@@ -31,33 +29,45 @@ function uniqueBy(arr, keyFn) {
   });
 }
 
-function toInt(n, fallback = 0) {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : fallback;
-}
-
-/* Compute derived stats from core fields */
-function recalcDerived(char) {
-  const race = races[char.race] || {};
-  const stats = char.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
-  const level = char.level || 1;
+function derive(stats, level, raceKey) {
+  const race = races[raceKey] || {};
   const baseHP = race.hp || 20;
   const baseBar = race.bar || 100;
-  const con = stats.con || 10;
-  const int = stats.int || 10;
-  const wis = stats.wis || 10;
-  const hp = calculateMaxHealth(baseHP, con, level);
-  const bar = calculateMaxBar(baseBar, int, wis, level);
-  const reflex = (race.reflex || 5) + Math.floor((stats.dex || 10) / 5) + Math.floor(level / 3);
+  const hp = calculateMaxHealth(baseHP, stats.con || 10, level || 1);
+  const bar = calculateMaxBar(baseBar, stats.int || 10, stats.wis || 10, level || 1);
+  const reflex = (race.reflex || 5) + Math.floor((stats.dex || 10) / 5) + Math.floor((level || 1) / 3);
   return { hp, bar, reflex };
 }
 
+function initialStatsWithRace(raceKey) {
+  const base = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+  const r = races[raceKey] || {};
+  Object.entries(r.bonuses || {}).forEach(([k, v]) => (base[k] = (base[k] || 0) + v));
+  return base;
+}
+
+function cleanString(v) {
+  return (v || '').toString().trim();
+}
+
+/* A light random helper for Create Random */
+function randomOf(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/* ----------------------------------
+   App
+-----------------------------------*/
 export default function App() {
-  // ----- Top-level state -----
-  const [step, setStep] = useState(1); // 0: Overview, 1: Home, 2: Choose Race, 3: DevTools, 4: Sheet
+  // navigation: 1 Home, 2 Race select, 4 Sheet, 'dev', 'overview'
+  const [step, setStep] = useState(1);
+
+  // characters
   const [charList, setCharList] = useState([]);
-  const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
+
+  // creation funnel values
+  const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
 
   // sheet UI state
   const [screen, setScreen] = useState('Main');
@@ -66,60 +76,37 @@ export default function App() {
   const [actionPoints, setActionPoints] = useState(3);
   const [customActions, setCustomActions] = useState([]);
 
-  // equipment local mirror (also persisted into currentChar.equipment)
+  // equipment state (mirrors currentChar.equipment)
   const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
 
+  // “Active on Turn”
+  const [activeEffects, setActiveEffects] = useState([]); // [{ name, perTurnCost }]
+
+  // New Action inputs
   const [newActionName, setNewActionName] = useState('');
   const [newActionBarCost, setNewActionBarCost] = useState(0);
 
-  // Active, persistent effects (deducted at start of turn)
-  const [activeEffects, setActiveEffects] = useState([]); // [{ name, perTurnCost }]
-
-  // Dev Tools UI
-  const [dmOpenId, setDmOpenId] = useState(null); // which character's inspector is open
-
-  // ----- Constants -----
-  const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
-
-  const calculateDerived = (stats, level = 1, race = {}) => {
-    const baseHP = race.hp || 20;
-    const baseBar = race.bar || 100;
-    const con = stats.con || 10;
-    const int = stats.int || 10;
-    const wis = stats.wis || 10;
-    const hp = calculateMaxHealth(baseHP, con, level);
-    const bar = calculateMaxBar(baseBar, int, wis, level);
-    const reflex = (race.reflex || 5) + Math.floor((stats.dex || 10) / 5) + Math.floor(level / 3);
-    return { hp, bar, reflex };
-  };
-
   /* ----------------------------------
-     Load characters (no auto-open)
+     Load characters
   -----------------------------------*/
   useEffect(() => {
-    const fetchCharacters = async () => {
+    (async () => {
       const { data, error } = await supabase.from('characters').select('*');
       if (error) {
         console.error('Failed to fetch characters:', error);
         return;
       }
       if (data) {
-        const parsed = data.map(row => row.data);
-        setCharList(parsed);
+        setCharList(data.map(r => r.data));
       }
-    };
-    fetchCharacters();
+    })();
   }, []);
 
   /* ----------------------------------
-     Loader (scoped so it can set state)
+     Core loaders / savers
   -----------------------------------*/
   const loadCharacter = async (id) => {
-    const { data, error } = await supabase
-      .from('characters')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const { data, error } = await supabase.from('characters').select('*').eq('id', id).single();
     if (error) {
       console.error('❌ Error loading character:', error);
       return;
@@ -127,9 +114,11 @@ export default function App() {
     if (data && data.data) {
       const loaded = data.data;
       setCurrentChar(loaded);
-      setEquipment(loaded.equipment && Array.isArray(loaded.equipment) && loaded.equipment.length
-        ? loaded.equipment
-        : [{ name: '', quantity: 1, customDesc: '' }]);
+      setEquipment(
+        loaded.equipment && Array.isArray(loaded.equipment) && loaded.equipment.length
+          ? loaded.equipment
+          : [{ name: '', quantity: 1, customDesc: '' }]
+      );
       setActionPoints(3);
       setActiveEffects(loaded.activeEffects || []);
       setScreen('Main');
@@ -137,16 +126,30 @@ export default function App() {
     }
   };
 
+  const persistEquipment = (updated) => {
+    setEquipment(updated);
+    if (!currentChar) return;
+    const updatedChar = { ...currentChar, equipment: updated };
+    setCurrentChar(updatedChar);
+    saveCharacter(updatedChar);
+  };
+
+  const persistEffects = (updated) => {
+    setActiveEffects(updated);
+    if (!currentChar) return;
+    const updatedChar = { ...currentChar, activeEffects: updated };
+    setCurrentChar(updatedChar);
+    saveCharacter(updatedChar);
+  };
+
   /* ----------------------------------
-     Create → choose race
+     Create flow (Home)
   -----------------------------------*/
   const startCreation = (e) => {
     e.preventDefault();
-    const { name, fruit, passcode } = {
-      name: e.target.name.value.trim(),
-      fruit: e.target.fruit.checked,
-      passcode: e.target.passcode.value.trim(),
-    };
+    const name = cleanString(e.target.name.value);
+    const passcode = cleanString(e.target.passcode.value);
+    const fruit = !!e.target.fruit.checked;
     if (!name || passcode.length !== 4) {
       alert('Enter a name and a 4-digit passcode');
       return;
@@ -156,19 +159,17 @@ export default function App() {
   };
 
   const chooseRace = (raceKey) => {
-    const race = races[raceKey];
-    const stats = { ...initStats };
-    Object.entries(race.bonuses || {}).forEach(([k, v]) => (stats[k] += v));
-    const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
+    const stats = initialStatsWithRace(raceKey);
     const level = 1;
-    const derived = calculateDerived(stats, level, race);
+    const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
+    const derived = derive(stats, level, raceKey);
     const char = {
       ...newChar,
       id: Date.now().toString(),
       race: raceKey,
       stats,
       level,
-      sp: race.sp,
+      sp: races[raceKey]?.sp ?? 0,
       ...derived,
       fruit,
       currentHp: derived.hp,
@@ -176,6 +177,8 @@ export default function App() {
       equipment: [],
       activeEffects: [],
       skills: [],
+      hidden: false,
+      meleeBonus: Math.floor((stats.str - 10) / 2) // keep your melee calc visible
     };
     setCharList(prev => [...prev, char]);
     setCurrentChar(char);
@@ -188,7 +191,7 @@ export default function App() {
   };
 
   /* ----------------------------------
-     Enter / delete
+     Enter / delete (Home)
   -----------------------------------*/
   const enterChar = async (char) => {
     const pass = prompt('Enter 4-digit passcode');
@@ -220,17 +223,18 @@ export default function App() {
   };
 
   /* ----------------------------------
-     Stats & level (on sheet)
+     Stats & level (Sheet)
   -----------------------------------*/
   const increaseStat = (stat) => {
     if (!currentChar || currentChar.sp <= 0) return;
-    const updated = { ...currentChar, stats: { ...(currentChar.stats || {}) } };
-    updated.stats[stat] = toInt(updated.stats[stat] ?? 10) + 1;
-    updated.sp = toInt(updated.sp) - 1;
-    const derived = calculateDerived(updated.stats, updated.level, races[updated.race]);
-    Object.assign(updated, derived);
-    updated.currentHp = Math.min(updated.currentHp, derived.hp);
-    updated.currentBar = Math.min(updated.currentBar, derived.bar);
+    const updated = { ...currentChar };
+    updated.stats[stat] = (updated.stats[stat] || 0) + 1;
+    updated.sp -= 1;
+    const d = derive(updated.stats, updated.level, updated.race);
+    Object.assign(updated, d);
+    updated.currentHp = Math.min(updated.currentHp, d.hp);
+    updated.currentBar = Math.min(updated.currentBar, d.bar);
+    updated.meleeBonus = Math.floor((updated.stats.str - 10) / 2);
     setCurrentChar(updated);
     saveCharacter(updated);
   };
@@ -238,259 +242,275 @@ export default function App() {
   const levelUp = () => {
     if (!currentChar) return;
     const updated = { ...currentChar };
-    updated.level = toInt(updated.level, 1) + 1;
-    updated.sp = toInt(updated.sp) + 3;
-    const derived = calculateDerived(updated.stats, updated.level, races[updated.race]);
-    Object.assign(updated, derived);
-    updated.currentHp = derived.hp;
-    updated.currentBar = derived.bar;
+    updated.level += 1;
+    updated.sp = (updated.sp || 0) + 3;
+    const d = derive(updated.stats, updated.level, updated.race);
+    Object.assign(updated, d);
+    updated.currentHp = d.hp;
+    updated.currentBar = d.bar;
     setCurrentChar(updated);
     saveCharacter(updated);
     setActionPoints(3);
   };
 
   /* ----------------------------------
-     Equipment → Actions bridge (useCost only)
+     Equipment → Actions bridge
   -----------------------------------*/
   const equipmentActions = useMemo(() => {
-    return (equipment || [])
-      .filter(it => it && it.name && it.name !== '')
-      .map(it => {
-        const meta = equipmentList.find(e => e.name === it.name) || {};
-        const cost = Number(it.useCost ?? meta.useCost ?? 0) || 0;
-        return { name: `Use ${it.name}`, barCost: cost, _kind: 'equipment', itemName: it.name };
-      });
+    const names = equipment.filter(it => it && it.name && it.name !== '').map(it => it.name);
+    const distinct = uniqueBy(names, n => n);
+    return distinct.map(n => {
+      const meta = equipmentList.find(e => e.name === n) || {};
+      const cost = Number(meta.useCost) || 0;
+      return { name: `Use ${n}`, barCost: cost, _kind: 'equipment', itemName: n };
+    });
   }, [equipment]);
 
-  /* ----------------------------------
-     Devil Fruit → Actions bridge (external JSON)
-  -----------------------------------*/
+  /* Devil Fruit → Actions */
   const devilFruitActions = useMemo(() => {
     const fruitName = currentChar?.fruit?.name;
     return fruitName ? getFruitActions(fruitName) : [];
   }, [currentChar]);
 
-  // Combined actions list
   const actionsToShow = useMemo(
     () => [...defaultActions, ...equipmentActions, ...devilFruitActions, ...customActions],
     [equipmentActions, devilFruitActions, customActions]
   );
 
-  // Persist equipment & effects whenever they change while a character is open
-  const persistEquipment = (updated) => {
-    setEquipment(updated);
-    if (!currentChar) return;
-    const updatedChar = { ...currentChar, equipment: updated };
-    setCurrentChar(updatedChar);
-    saveCharacter(updatedChar);
-  };
-
-  const persistEffects = (updated) => {
-    setActiveEffects(updated);
-    if (!currentChar) return;
-    const updatedChar = { ...currentChar, activeEffects: updated };
-    setCurrentChar(updatedChar);
-    saveCharacter(updatedChar);
-  };
-
   /* ----------------------------------
-     Admin / DM tools helpers
+     DM TOOLS helpers
   -----------------------------------*/
-  const adminPersist = async (updated) => {
+  const dmSaveInlineName = async (char, nextName) => {
+    const updated = { ...char, name: cleanString(nextName || char.name) };
     const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
-    if (error) alert('Save failed.');
-    setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    if (!error) setCharList(prev => prev.map(c => (c.id === updated.id ? updated : c)));
   };
 
-  const adminDelete = async (char) => {
+  const dmDelete = async (char) => {
     if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
     const { error } = await supabase.from('characters').delete().eq('id', char.id);
-    if (error) {
-      alert('Delete failed.');
-      return;
-    }
+    if (error) { alert('Delete failed.'); return; }
     setCharList(prev => prev.filter(c => c.id !== char.id));
   };
 
-  const adminCopy = async (char) => {
-    const clone = { ...char, id: `${Date.now()}_${Math.floor(Math.random() * 1000)}`, name: `${char.name} (Copy)` };
+  const dmCopy = async (char) => {
+    const clone = { ...char, id: `${Date.now()}_${Math.floor(Math.random()*1000)}`, name: `${char.name} (Copy)` };
     const { error } = await supabase.from('characters').insert({ id: clone.id, data: clone });
     if (error) { alert('Copy failed.'); return; }
     setCharList(prev => [...prev, clone]);
   };
 
-  const adminLevelAdjust = async (char, delta) => {
-    const updated = { ...char };
-    updated.level = Math.max(1, toInt(updated.level, 1) + delta);
-    updated.sp = Math.max(0, toInt(updated.sp, 0) + (3 * delta));
-    const derived = recalcDerived(updated);
-    Object.assign(updated, derived);
-    updated.currentHp = Math.min(toInt(updated.currentHp, derived.hp), derived.hp);
-    updated.currentBar = Math.min(toInt(updated.currentBar, derived.bar), derived.bar);
-    await adminPersist(updated);
+  const dmLevelAdjust = async (char, delta) => {
+    const next = { ...char, level: Math.max(1, (char.level || 1) + delta) };
+    // Adjust SP (+3 / -3) with floor 0
+    next.sp = Math.max(0, (next.sp || 0) + (delta > 0 ? 3 : -3));
+    const d = derive(next.stats || {}, next.level, next.race);
+    Object.assign(next, d);
+    next.currentHp = Math.min(next.currentHp ?? d.hp, d.hp);
+    next.currentBar = Math.min(next.currentBar ?? d.bar, d.bar);
+    const { error } = await supabase.from('characters').upsert({ id: next.id, data: next });
+    if (error) { alert('Level change failed.'); return; }
+    setCharList(prev => prev.map(c => (c.id === next.id ? next : c)));
   };
 
-  const adminModifyFruit = async (char) => {
+  const dmSkillPointsAdjust = async (char, delta) => {
+    const next = { ...char, sp: Math.max(0, (char.sp || 0) + delta) };
+    const { error } = await supabase.from('characters').upsert({ id: next.id, data: next });
+    if (!error) setCharList(prev => prev.map(c => (c.id === next.id ? next : c)));
+  };
+
+  const dmModifyFruit = async (char) => {
     const current = char.fruit?.name || '';
     const names = devilFruits.map(f => f.name).join(', ');
     const input = prompt(`Enter Devil Fruit name (or type 'none' to remove)\nAvailable: ${names}`, current);
     if (input === null) return;
     const trimmed = input.trim();
-    let updated = { ...char };
+    const next = { ...char };
     if (!trimmed || trimmed.toLowerCase() === 'none') {
-      updated.fruit = null;
+      next.fruit = null;
     } else {
       const found = devilFruits.find(f => f.name.toLowerCase() === trimmed.toLowerCase());
       if (!found) { alert('Fruit not found.'); return; }
-      updated.fruit = { name: found.name, ability: found.ability };
+      next.fruit = { name: found.name, ability: found.ability };
     }
-    await adminPersist(updated);
+    const { error } = await supabase.from('characters').upsert({ id: next.id, data: next });
+    if (!error) setCharList(prev => prev.map(c => (c.id === next.id ? next : c)));
   };
 
-  // Small helpers for inspector
-  const modOf = (statVal) => Math.floor((toInt(statVal, 10) - 10) / 2);
-  const withStatDeltaFromMod = (char, key, modDelta) => {
-    const updated = { ...char, stats: { ...(char.stats || {}) } };
-    updated.stats[key] = toInt(updated.stats[key] ?? 10) + (2 * modDelta);
-    const derived = recalcDerived(updated);
-    Object.assign(updated, derived);
-    updated.currentHp = Math.min(toInt(updated.currentHp, derived.hp), derived.hp);
-    updated.currentBar = Math.min(toInt(updated.currentBar, derived.bar), derived.bar);
-    return updated;
+  const dmToggleHidden = async (char, checked) => {
+    const next = { ...char, hidden: !!checked };
+    const { error } = await supabase.from('characters').upsert({ id: next.id, data: next });
+    if (!error) setCharList(prev => prev.map(c => (c.id === next.id ? next : c)));
   };
-  const withNumDelta = (char, key, delta) => ({ ...char, [key]: Math.max(0, toInt(char[key]) + delta) });
+
+  const dmViewSheet = async (char) => {
+    await loadCharacter(char.id); // bypass PIN
+  };
+
+  const dmCreateCustom = async () => {
+    // 1) name
+    const name = cleanString(prompt('Character name?') || '');
+    if (!name) return;
+
+    // 2) race
+    const raceNames = Object.keys(races);
+    const raceInput = cleanString(prompt(`Choose a race:\n${raceNames.join(', ')}`) || '');
+    const raceKey = raceNames.find(r => r.toLowerCase() === raceInput.toLowerCase());
+    if (!raceKey) { alert('Invalid race.'); return; }
+
+    // 3) Devil Fruit
+    const fruitNames = devilFruits.map(f => f.name);
+    const fruitInput = cleanString(prompt(`Devil Fruit (type a name, or 'none'):\n${fruitNames.join(', ')}`) || '');
+    let fruit = null;
+    if (fruitInput && fruitInput.toLowerCase() !== 'none') {
+      const found = devilFruits.find(f => f.name.toLowerCase() === fruitInput.toLowerCase());
+      if (!found) { alert('Fruit not found.'); return; }
+      fruit = { name: found.name, ability: found.ability };
+    }
+
+    // 4) Hidden?
+    const hiddenAns = cleanString(prompt('Hidden on Home page? (yes/no)', 'no') || 'no');
+    const hidden = ['y', 'yes', 'true', '1'].includes(hiddenAns.toLowerCase());
+
+    // build character
+    const stats = initialStatsWithRace(raceKey);
+    const level = 1;
+    const d = derive(stats, level, raceKey);
+    const passcode = (Math.floor(Math.random() * 9000) + 1000).toString(); // DM can change later if needed
+
+    const char = {
+      id: Date.now().toString(),
+      name,
+      passcode,
+      race: raceKey,
+      stats,
+      level,
+      sp: races[raceKey]?.sp ?? 0,
+      ...d,
+      currentHp: d.hp,
+      currentBar: d.bar,
+      fruit,
+      equipment: [],
+      activeEffects: [],
+      skills: [],
+      hidden,
+      meleeBonus: Math.floor((stats.str - 10) / 2)
+    };
+
+    const { error } = await supabase.from('characters').insert({ id: char.id, data: char });
+    if (error) { alert('Create failed.'); return; }
+    setCharList(prev => [...prev, char]);
+  };
+
+  const dmCreateRandom = async () => {
+    const raceNames = Object.keys(races);
+    const raceKey = randomOf(raceNames);
+    const stats = initialStatsWithRace(raceKey);
+    // add small random bumps
+    ['str','dex','con','int','wis','cha'].forEach(k => { stats[k] += Math.floor(Math.random()*3); });
+    const level = 1 + Math.floor(Math.random()*3);
+    const fruitPick = Math.random() < 0.5 ? null : randomOf(devilFruits);
+    const fruit = fruitPick ? { name: fruitPick.name, ability: fruitPick.ability } : null;
+    const d = derive(stats, level, raceKey);
+
+    const char = {
+      id: Date.now().toString(),
+      name: `NPC ${Math.floor(Math.random()*10000)}`,
+      passcode: (Math.floor(Math.random() * 9000) + 1000).toString(),
+      race: raceKey,
+      stats,
+      level,
+      sp: races[raceKey]?.sp ?? 0,
+      ...d,
+      currentHp: d.hp,
+      currentBar: d.bar,
+      fruit,
+      equipment: [],
+      activeEffects: [],
+      skills: [],
+      hidden: true, // random NPC default hidden
+      meleeBonus: Math.floor((stats.str - 10) / 2)
+    };
+
+    const { error } = await supabase.from('characters').insert({ id: char.id, data: char });
+    if (error) { alert('Create failed.'); return; }
+    setCharList(prev => [...prev, char]);
+  };
 
   /* ----------------------------------
-     Renders
+     Renders: Overview
   -----------------------------------*/
-  // Overview page
-  if (step === 0) {
+  if (step === 'overview') {
     return <Overview onBack={() => setStep(1)} />;
   }
 
-  // DM / DevTools page
-  if (step === 3) {
+  /* ----------------------------------
+     Renders: Dev tools
+  -----------------------------------*/
+  if (step === 'dev') {
     return (
       <div style={{ padding: '1rem' }}>
         <button onClick={() => setStep(1)}>← Back</button>
         <h1>Dungeon Master Tools</h1>
         <p style={{ color: '#666' }}>Administer characters below.</p>
-        <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
-          {charList.map((char) => {
-            const race = char.race || 'Unknown';
-            const lvl = toInt(char.level, 1);
-            const isOpen = dmOpenId === char.id;
-            const stats = char.stats || {};
-            const meleeText = char.meleeText ?? `1d6 + ${modOf(stats.str)}`;
-            return (
-              <li key={char.id} style={{ marginBottom: '0.8rem' }}>
-                {/* Row */}
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button onClick={() => setDmOpenId(isOpen ? null : char.id)} style={{ minWidth: 240, textAlign: 'left' }}>
-                    {char.name} ({race}) (Level {lvl})
-                  </button>
-                  <button onClick={() => adminDelete(char)} style={{ background: '#fde7e7' }}>Delete</button>
-                  <button onClick={() => adminCopy(char)}>Copy</button>
-                  <button onClick={() => adminLevelAdjust(char, +1)}>Lvl +</button>
-                  <button onClick={() => adminLevelAdjust(char, -1)}>Lvl -</button>
-                  {/* quick SP adjust */}
-                  <button onClick={async () => { await adminPersist({ ...char, sp: toInt(char.sp) + 0 }); setCharList(prev => prev.map(c => c.id === char.id ? { ...c, sp: toInt(c.sp) + 1 } : c)); }}>SP +</button>
-                  <button onClick={async () => { await adminPersist({ ...char, sp: Math.max(0, toInt(char.sp) - 0) }); setCharList(prev => prev.map(c => c.id === char.id ? { ...c, sp: Math.max(0, toInt(c.sp) - 1) } : c)); }}>SP -</button>
-                  <button onClick={() => adminModifyFruit(char)}>Modify DevilFruit</button>
-                </div>
 
-                {/* Inspector */}
-                {isOpen && (
-                  <div style={{ marginTop: '0.5rem', padding: '0.6rem', border: '1px solid #ddd', borderRadius: 6 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.6rem' }}>
-                      {/* Max HP */}
-                      <div>
-                        <strong>Max Health:</strong> {toInt(char.hp)}
-                        <div>
-                          <button onClick={async () => { const next = withNumDelta(char, 'hp', +1); await adminPersist(next); }}>+</button>
-                          <button onClick={async () => { const next = withNumDelta(char, 'hp', -1); await adminPersist(next); }} style={{ marginLeft: 4 }}>-</button>
-                        </div>
-                      </div>
+        {/* Create buttons */}
+        <div style={{ marginBottom: '0.75rem', display: 'flex', gap: '0.5rem' }}>
+          <button onClick={dmCreateCustom}>Create Custom</button>
+          <button onClick={dmCreateRandom}>Create Random</button>
+        </div>
 
-                      {/* Max Bar */}
-                      <div>
-                        <strong>Max Bar:</strong> {toInt(char.bar)}
-                        <div>
-                          <button onClick={async () => { const next = withNumDelta(char, 'bar', +1); await adminPersist(next); }}>+</button>
-                          <button onClick={async () => { const next = withNumDelta(char, 'bar', -1); await adminPersist(next); }} style={{ marginLeft: 4 }}>-</button>
-                        </div>
-                      </div>
+        <ul>
+          {charList.map((char) => (
+            <li key={char.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+              {/* Editable name shows race & level inline */}
+              <input
+                defaultValue={`${char.name} (${char.race}) (Level ${char.level})`}
+                onBlur={(e) => {
+                  // allow editing just the leading name part if desired
+                  // we'll try to parse a name up to " ("
+                  const raw = e.target.value;
+                  const idx = raw.indexOf(' (');
+                  const justName = idx >= 0 ? raw.slice(0, idx) : raw;
+                  dmSaveInlineName(char, justName);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur();
+                  }
+                }}
+                style={{ minWidth: 260 }}
+              />
 
-                      {/* Reflex */}
-                      <div>
-                        <strong>Reflex:</strong> {toInt(char.reflex)}
-                        <div>
-                          <button onClick={async () => { const next = withNumDelta(char, 'reflex', +1); await adminPersist(next); }}>+</button>
-                          <button onClick={async () => { const next = withNumDelta(char, 'reflex', -1); await adminPersist(next); }} style={{ marginLeft: 4 }}>-</button>
-                        </div>
-                      </div>
+              <button onClick={() => dmDelete(char)} style={{ background: '#fde7e7' }}>Delete</button>
+              <button onClick={() => dmCopy(char)}>Copy</button>
 
-                      {/* Melee text */}
-                      <div>
-                        <strong>Melee:</strong> {meleeText}
-                        <div style={{ marginTop: 4 }}>
-                          <button
-                            onClick={async () => {
-                              const text = prompt('Enter melee text (e.g., "1d8 + 2")', meleeText);
-                              if (text === null) return;
-                              const next = { ...char, meleeText: text.trim() || undefined };
-                              await adminPersist(next);
-                            }}
-                          >
-                            Modify Text
-                          </button>
-                        </div>
-                      </div>
+              <button onClick={() => dmLevelAdjust(char, +1)}>Lvl +</button>
+              <button onClick={() => dmLevelAdjust(char, -1)}>Lvl -</button>
 
-                      {/* SP readout */}
-                      <div>
-                        <strong>Skill Points:</strong> {toInt(char.sp)}
-                      </div>
-                    </div>
+              <button onClick={() => dmSkillPointsAdjust(char, +1)}>SP +</button>
+              <button onClick={() => dmSkillPointsAdjust(char, -1)}>SP -</button>
 
-                    {/* Modifiers */}
-                    <div style={{ marginTop: '0.6rem' }}>
-                      <strong>Main Stat Modifiers</strong>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.4rem', marginTop: '0.3rem' }}>
-                        {['cha', 'con', 'dex', 'int', 'str', 'wis'].map((k) => {
-                          const mod = modOf((stats[k] ?? 10));
-                          return (
-                            <div key={k}>
-                              {k.toUpperCase()}: {mod}{' '}
-                              <button
-                                onClick={async () => {
-                                  const next = withStatDeltaFromMod(char, k, +1); // +1 mod => +2 stat
-                                  await adminPersist(next);
-                                }}
-                              >+</button>
-                              <button
-                                onClick={async () => {
-                                  const next = withStatDeltaFromMod(char, k, -1);
-                                  await adminPersist(next);
-                                }}
-                                style={{ marginLeft: 4 }}
-                              >-</button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </li>
-            );
-          })}
+              <button onClick={() => dmModifyFruit(char)}>Modify DevilFruit</button>
+              <button onClick={() => dmViewSheet(char)}>View Sheet</button>
+
+              <label style={{ marginLeft: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={!!char.hidden}
+                  onChange={(e) => dmToggleHidden(char, e.target.checked)}
+                /> Hidden
+              </label>
+            </li>
+          ))}
         </ul>
       </div>
     );
   }
 
-  // Choose race page
+  /* ----------------------------------
+     Renders: Race select
+  -----------------------------------*/
   if (step === 2) {
     return (
       <div style={{ padding: '1rem' }}>
@@ -506,24 +526,21 @@ export default function App() {
     );
   }
 
-  // Character sheet
+  /* ----------------------------------
+     Renders: Character Sheet
+  -----------------------------------*/
   if (step === 4 && currentChar) {
-    const strMod = Math.floor(((currentChar.stats?.str ?? 10) - 10) / 2);
-    const meleeDisplay = currentChar.meleeText ?? `1d6 + ${strMod}`;
-
     return (
       <div style={{ padding: '1rem' }}>
-        {/* Back clears the open session */}
         <button onClick={() => { setCurrentChar(null); setStep(1); }}>← Back</button>
 
         <h2>{currentChar.name} (Level {currentChar.level})</h2>
         <p><strong>Race:</strong> {currentChar.race}</p>
-
         <p>
           <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} |{' '}
           <strong>Bar:</strong> {currentChar.currentBar} / {currentChar.bar} |{' '}
           <strong>Reflex:</strong> {currentChar.reflex} |{' '}
-          <strong>Melee:</strong> {meleeDisplay}
+          <strong>Melee:</strong> 1d6 + {Math.floor((currentChar.stats?.str - 10) / 2)}
         </p>
 
         <button onClick={levelUp}>Level Up (+3 SP & full restore)</button>
@@ -540,7 +557,7 @@ export default function App() {
           <>
             <h3>Main Stats</h3>
             <ul>
-              {Object.entries(currentChar.stats || initStats).map(([k, v]) => (
+              {Object.entries(currentChar.stats).map(([k, v]) => (
                 <li key={k}>
                   {k.toUpperCase()}: {v}
                   {currentChar.sp > 0 && (
@@ -584,24 +601,32 @@ export default function App() {
               saveCharacter(updated);
             }} style={{ marginLeft: '0.5rem' }}>Regain Bar</button>
 
-            {/* Rest buttons */}
+            {/* Rest helpers */}
             <div style={{ marginTop: '1rem' }}>
-              <button style={{ color: 'crimson', marginRight: '1rem' }} onClick={() => {
-                const updated = { ...currentChar };
-                // Long Rest: +10 current HP (cap at max), Bar to full
-                updated.currentHp = Math.min(updated.currentHp + 10, updated.hp);
-                updated.currentBar = updated.bar;
-                setCurrentChar(updated);
-                saveCharacter(updated);
-              }}>Long Rest</button>
-              <button style={{ color: 'crimson' }} onClick={() => {
-                const updated = { ...currentChar };
-                // Short Rest: +50% of max bar to current (cap at max)
-                const bonus = Math.floor(updated.bar * 0.5);
-                updated.currentBar = Math.min(updated.currentBar + bonus, updated.bar);
-                setCurrentChar(updated);
-                saveCharacter(updated);
-              }}>Short Rest</button>
+              <button
+                style={{ color: 'crimson', marginRight: '1rem' }}
+                onClick={() => {
+                  const updated = { ...currentChar };
+                  updated.currentHp = Math.min(updated.currentHp + 10, updated.hp);
+                  updated.currentBar = updated.bar;
+                  setCurrentChar(updated);
+                  saveCharacter(updated);
+                }}
+              >
+                Long Rest
+              </button>
+              <button
+                style={{ color: 'crimson' }}
+                onClick={() => {
+                  const updated = { ...currentChar };
+                  const bonus = Math.floor(updated.bar * 0.5);
+                  updated.currentBar = Math.min(updated.currentBar + bonus, updated.bar);
+                  setCurrentChar(updated);
+                  saveCharacter(updated);
+                }}
+              >
+                Short Rest
+              </button>
             </div>
           </>
         )}
@@ -611,7 +636,6 @@ export default function App() {
             <h3>Actions</h3>
             <p>Action Points: {actionPoints}</p>
             <button onClick={() => {
-              // start of turn: reset AP and charge persistent effects
               const totalUpkeep = activeEffects.reduce((sum, e) => sum + (Number(e.perTurnCost) || 0), 0);
               if (currentChar.currentBar < totalUpkeep) {
                 alert(`Not enough Bar to maintain effects (need ${totalUpkeep}). All effects turned off.`);
@@ -625,7 +649,6 @@ export default function App() {
               setActionPoints(3);
             }}>Take Turn</button>
 
-            {/* Active on Turn */}
             {activeEffects.length > 0 && (
               <div style={{ marginTop: '0.75rem', padding: '0.5rem', border: '1px dashed #aaa' }}>
                 <strong>Active on Turn</strong>
@@ -649,13 +672,11 @@ export default function App() {
                     const cost = action.barCost || 0;
                     if (actionPoints <= 0) { alert('No Action Points left!'); return; }
                     if (currentChar.currentBar < cost) { alert('Not enough Bar!'); return; }
-                    const updated = { ...currentChar };
-                    updated.currentBar -= cost; // upfront cost
+                    const updated = { ...currentChar, currentBar: currentChar.currentBar - cost };
                     setCurrentChar(updated);
                     saveCharacter(updated);
-                    setActionPoints(prev => prev - 1); // spend an AP
+                    setActionPoints(prev => prev - 1);
 
-                    // if action has upkeep, toggle it on (if not already present)
                     if (action.perTurnCost && action.perTurnCost > 0) {
                       const already = activeEffects.some(e => e.name === action.name);
                       if (!already) persistEffects([...activeEffects, { name: action.name, perTurnCost: action.perTurnCost }]);
@@ -692,10 +713,7 @@ export default function App() {
         )}
 
         {screen === 'Equipment' && (
-          <EquipmentSheet
-            equipment={equipment}
-            setEquipment={persistEquipment}
-          />
+          <EquipmentSheet equipment={equipment} setEquipment={persistEquipment} />
         )}
 
         {screen === 'Devil Fruit' && (
@@ -704,9 +722,7 @@ export default function App() {
             {currentChar.fruit ? (
               <>
                 <div><strong>Name:</strong> {currentChar.fruit.name}</div>
-                {currentChar.fruit.ability && (
-                  <p style={{ marginTop: '0.5rem' }}><em>{currentChar.fruit.ability}</em></p>
-                )}
+                {currentChar.fruit.ability && <p style={{ marginTop: '0.5rem' }}><em>{currentChar.fruit.ability}</em></p>}
                 {devilFruitActions.length > 0 && (
                   <div style={{ marginTop: '0.75rem' }}>
                     <strong>Starting Actions</strong>
@@ -730,8 +746,7 @@ export default function App() {
             <p>Skill Points: {currentChar.sp}</p>
             <button onClick={() => {
               if (currentChar.sp <= 0) { alert('No Skill Points left.'); return; }
-              const updated = { ...currentChar };
-              updated.sp = toInt(updated.sp) - 1;
+              const updated = { ...currentChar, sp: currentChar.sp - 1 };
               setCurrentChar(updated);
               saveCharacter(updated);
             }}>Spend Skill Point</button>
@@ -764,17 +779,31 @@ export default function App() {
   }
 
   /* ----------------------------------
-     Home
+     Renders: Home
   -----------------------------------*/
   return (
     <div style={{ padding: '1rem', position: 'relative', minHeight: '100vh' }}>
       <h1>OPDND</h1>
 
-      {/* Top-right Overview button */}
+      {/* Overview (top-right) */}
       <div style={{ position: 'fixed', right: '1rem', top: '1rem' }}>
-        <button style={{ color: 'crimson' }} onClick={() => setStep(0)}>Overview</button>
+        <button style={{ color: 'crimson' }} onClick={() => setStep('overview')}>Overview</button>
       </div>
 
+      {/* Dev Tools (bottom-left) */}
+      <div style={{ position: 'fixed', left: '1rem', bottom: '1rem' }}>
+        <button
+          style={{ color: 'crimson' }}
+          onClick={() => {
+            const pin = prompt('Enter Dev PIN');
+            if (pin === '5637') setStep('dev'); else alert('Incorrect PIN.');
+          }}
+        >
+          DevTool Mode
+        </button>
+      </div>
+
+      {/* Create */}
       <form onSubmit={startCreation}>
         <input name="name" placeholder="Character Name" required />
         <input name="passcode" placeholder="4-digit Passcode" maxLength="4" required />
@@ -787,25 +816,14 @@ export default function App() {
 
       <h2 style={{ marginTop: '2rem' }}>Characters</h2>
       <ul>
-        {charList.map((char) => (
+        {charList.filter(c => !c.hidden).map((char) => (
           <li key={char.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
             <button onClick={() => enterChar(char)}>{char.name} ({char.race})</button>
+            <span style={{ color: '#777' }}>(Level {char.level})</span>
             <button onClick={() => deleteCharacter(char)} style={{ background: '#fbe9e9', border: '1px solid #e57373' }}>Delete</button>
           </li>
         ))}
       </ul>
-
-      {/* Bottom-left Dev Tool Mode */}
-      <div style={{ position: 'fixed', left: '1rem', bottom: '1rem' }}>
-        <button style={{ color: 'crimson' }}
-          onClick={() => {
-            const pin = prompt('Enter Dev PIN');
-            if (pin === '5637') { setDmOpenId(null); setStep(3); } else alert('Incorrect PIN.');
-          }}
-        >
-          DevTool Mode
-        </button>
-      </div>
     </div>
   );
 }
