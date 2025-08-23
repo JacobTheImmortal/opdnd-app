@@ -4,77 +4,74 @@ import { supabase } from './supabaseClient';
 import { races } from './races';
 import { devilFruits } from './devilFruits';
 
-// small helpers
-const deepClone = (o) => JSON.parse(JSON.stringify(o));
-const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n || 0));
+// --- small local helpers (copied from App to avoid re-import cycles)
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n || 0));
+const deepClone = (obj) => JSON.parse(JSON.stringify(obj));
 const modFromScore = (score) => Math.floor((Number(score || 10) - 10) / 2);
 
-// BASE only (no DM mods)
-function recalcBase(char) {
+// Keep this “recalc” aligned with App’s logic
+function recalcDerived(char) {
   const race = races[char.race] || {};
   const stats = char.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
   const level = char.level || 1;
   const baseHP = race.hp || 20;
   const baseBar = race.bar || 100;
-  const hp = baseHP + Math.max(0, (stats.con || 10) - 10) * 2 + (level - 1) * 5;
-  const bar =
-    baseBar + Math.max(0, (stats.int || 10) - 10) * 2 + Math.max(0, (stats.wis || 10) - 10) * 2 + level * 5;
+  const con = stats.con || 10;
+  const int = stats.int || 10;
+  const wis = stats.wis || 10;
+  const hp = baseHP + Math.max(0, con - 10) * 2 + (level - 1) * 5; // mirrors calculateMaxHealth
+  const bar = baseBar + Math.max(0, int - 10) * 2 + Math.max(0, wis - 10) * 2 + level * 5;
   const reflex = (race.reflex || 5) + Math.floor((stats.dex || 10) / 5) + Math.floor(level / 3);
-  return { baseHp: hp, baseBar: bar, baseReflex: reflex };
+  return { hp, bar, reflex };
 }
 
-// apply DM modifiers (flat additive)
-function withMods(base, mods) {
-  const hpMod = Number(mods.hpMod || 0);
-  const barMod = Number(mods.barMod || 0);
-  const reflexMod = Number(mods.reflexMod || 0);
-  return {
-    hp: Math.max(1, (base.baseHp || 1) + hpMod),
-    bar: Math.max(0, (base.baseBar || 0) + barMod),
-    reflex: Math.max(0, (base.baseReflex || 0) + reflexMod),
-  };
-}
-
-export default function DmTools({ charList, setCharList, onBack, onOpenSheet }) {
+export default function DmTools({
+  charList,
+  setCharList,
+  onBack,
+  onOpenSheet, // (char) => void (App will set currentChar, equipment, etc.)
+}) {
   const [expanded, setExpanded] = useState({}); // id -> boolean
   const toggleExpand = (id) => setExpanded((m) => ({ ...m, [id]: !m[id] }));
 
+  // -- thin upsert wrapper used by many controls
   const saveInline = async (updated) => {
     const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
-    if (error) return alert('Save failed.');
-    setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    if (!error) {
+      setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    } else {
+      alert('Save failed.');
+    }
   };
 
+  // ----- Admin actions (moved from App.jsx)
   const adminDelete = async (char) => {
     if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
     const { error } = await supabase.from('characters').delete().eq('id', char.id);
     if (error) return alert('Delete failed.');
     setCharList((prev) => prev.filter((c) => c.id !== char.id));
   };
+
   const adminCopy = async (char) => {
     const clone = { ...deepClone(char), id: `${Date.now()}_${Math.floor(Math.random() * 1000)}`, name: `${char.name} (Copy)` };
     const { error } = await supabase.from('characters').insert({ id: clone.id, data: clone });
     if (error) return alert('Copy failed.');
     setCharList((prev) => [...prev, clone]);
   };
+
   const adminLevelAdjust = async (char, delta) => {
     const updated = deepClone(char);
     updated.level = Math.max(1, (updated.level || 1) + delta);
     updated.sp = (updated.sp || 0) + (delta > 0 ? 3 : -3 * Math.min(1, Math.abs(delta)));
-    // ensure mods present
-    updated.hpMod = Number(updated.hpMod || 0);
-    updated.barMod = Number(updated.barMod || 0);
-    updated.reflexMod = Number(updated.reflexMod || 0);
-    // base -> totals
-    const base = recalcBase(updated);
-    const totals = withMods(base, updated);
-    Object.assign(updated, base, totals);
-    updated.currentHp = Math.min(updated.currentHp ?? totals.hp, totals.hp);
-    updated.currentBar = Math.min(updated.currentBar ?? totals.bar, totals.bar);
+    const derived = recalcDerived(updated);
+    Object.assign(updated, derived);
+    updated.currentHp = Math.min(updated.currentHp ?? derived.hp, derived.hp);
+    updated.currentBar = Math.min(updated.currentBar ?? derived.bar, derived.bar);
     const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
     if (error) return alert('Level change failed.');
     setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
   };
+
   const adminSpAdjust = async (char, delta) => {
     const updated = deepClone(char);
     updated.sp = Math.max(0, (updated.sp || 0) + delta);
@@ -82,6 +79,7 @@ export default function DmTools({ charList, setCharList, onBack, onOpenSheet }) 
     if (error) return alert('SP change failed.');
     setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
   };
+
   const adminModifyFruit = async (char) => {
     const current = char.fruit?.name || '';
     const names = devilFruits.map((f) => f.name).join(', ');
@@ -99,32 +97,121 @@ export default function DmTools({ charList, setCharList, onBack, onOpenSheet }) 
     if (error) return alert('Update failed.');
     setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
   };
+
   const toggleHidden = async (char) => {
     const updated = { ...char, hidden: !char.hidden };
     const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
     if (!error) setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
   };
 
-  // --- UI helpers for DM modifiers (+1, +5, -5) ---
-  const bumpMod = async (char, field, delta) => {
-    const updated = deepClone(char);
-    updated[field] = Number(updated[field] || 0) + delta;
-    // recompute base and totals
-    const base = recalcBase(updated);
-    const totals = withMods(base, updated);
-    Object.assign(updated, base, totals);
-    updated.currentHp = Math.min(updated.currentHp ?? totals.hp, totals.hp);
-    updated.currentBar = Math.min(updated.currentBar ?? totals.bar, totals.bar);
-    await saveInline(updated);
+  const createCustom = async () => {
+    const name = (prompt('Name for character?') || '').trim();
+    if (!name) return;
+    const raceNames = Object.keys(races);
+    const racePick = prompt(`Choose race (exact):\n${raceNames.join(', ')}`, raceNames[0]) || raceNames[0];
+    if (!races[racePick]) return alert('Race not found.');
+
+    const fruitInput = prompt(`Devil Fruit name (or 'none')?`, 'none') || 'none';
+    const hiddenAns = (prompt(`Hidden? (yes/no)`, 'no') || 'no').toLowerCase().startsWith('y');
+    const passcode = (prompt('4-digit passcode (for player view)?', '0000') || '0000').slice(0, 4);
+
+    const baseStats = deepClone({ str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 });
+    const race = races[racePick];
+    Object.entries(race.bonuses || {}).forEach(([k, v]) => (baseStats[k] += v));
+
+    const derived = recalcDerived({ race: racePick, stats: baseStats, level: 1 });
+    const fruit =
+      fruitInput.toLowerCase() === 'none'
+        ? null
+        : (() => {
+            const f = devilFruits.find((df) => df.name.toLowerCase() === fruitInput.toLowerCase());
+            return f ? { name: f.name, ability: f.ability } : null;
+          })();
+
+    const char = {
+      id: Date.now().toString(),
+      name,
+      passcode,
+      race: racePick,
+      stats: baseStats,
+      level: 1,
+      sp: race.sp,
+      ...derived,
+      fruit,
+      currentHp: derived.hp,
+      currentBar: derived.bar,
+      equipment: [],
+      activeEffects: [],
+      skills: [],
+      hidden: hiddenAns,
+      meleeText: '1d6',
+      meleeBonus: modFromScore(baseStats.str),
+    };
+    const { error } = await supabase.from('characters').insert({ id: char.id, data: char });
+    if (error) return alert('Create failed.');
+    setCharList((prev) => [...prev, char]);
   };
 
-  const setModFromPrompt = async (char, field, label) => {
-    const cur = Number(char[field] || 0);
-    const v = prompt(`${label} modifier (can be negative):`, String(cur));
-    if (v === null) return;
-    const n = Number(v);
-    if (!Number.isFinite(n)) return alert('Enter a number.');
-    await bumpMod(char, field, n - cur);
+  const createRandom = async () => {
+    const raceNames = Object.keys(races);
+    const racePick = raceNames[Math.floor(Math.random() * raceNames.length)];
+    const race = races[racePick];
+    const baseStats = deepClone({ str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 });
+    Object.entries(race.bonuses || {}).forEach(([k, v]) => (baseStats[k] += v));
+    ['str', 'dex', 'con', 'int', 'wis', 'cha'].forEach((k) => (baseStats[k] = clamp(baseStats[k] + Math.floor(Math.random() * 5) - 2, 6, 20)));
+    const derived = recalcDerived({ race: racePick, stats: baseStats, level: 1 });
+    const fruit = Math.random() > 0.6 ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
+
+    const char = {
+      id: Date.now().toString(),
+      name: `NPC ${Math.floor(Math.random() * 900 + 100)}`,
+      passcode: '0000',
+      race: racePick,
+      stats: baseStats,
+      level: 1,
+      sp: race.sp,
+      ...derived,
+      fruit: fruit ? { name: fruit.name, ability: fruit.ability } : null,
+      currentHp: derived.hp,
+      currentBar: derived.bar,
+      equipment: [],
+      activeEffects: [],
+      skills: [],
+      hidden: (prompt('Create as hidden? (yes/no)', 'yes') || 'yes').toLowerCase().startsWith('y'),
+      meleeText: '1d6',
+      meleeBonus: modFromScore(baseStats.str),
+    };
+    const { error } = await supabase.from('characters').insert({ id: char.id, data: char });
+    if (error) return alert('Create failed.');
+    setCharList((prev) => [...prev, char]);
+  };
+
+  // ---- generic numeric setters used in the expanded editor
+  const setNumField = (char, field, value) => {
+    const updated = deepClone(char);
+    updated[field] = Number(value || 0);
+    saveInline(updated);
+  };
+  const nudgeNumField = (char, field, delta) => {
+    const updated = deepClone(char);
+    updated[field] = Number(updated[field] || 0) + delta;
+    saveInline(updated);
+  };
+  const setMeleeText = (char, text) => {
+    const updated = deepClone(char);
+    updated.meleeText = (text || '1d6').trim();
+    saveInline(updated);
+  };
+  const setMeleeBonus = (char, v) => setNumField(char, 'meleeBonus', v);
+
+  const adjustMod = (char, statKey, delta) => {
+    const updated = deepClone(char);
+    updated.stats[statKey] = clamp((updated.stats[statKey] || 10) + delta * 2, 1, 30);
+    const derived = recalcDerived(updated);
+    Object.assign(updated, derived);
+    updated.currentHp = Math.min(updated.currentHp ?? derived.hp, derived.hp);
+    updated.currentBar = Math.min(updated.currentBar ?? derived.bar, derived.bar);
+    saveInline(updated);
   };
 
   return (
@@ -132,61 +219,21 @@ export default function DmTools({ charList, setCharList, onBack, onOpenSheet }) 
       <button onClick={onBack}>← Back</button>
       <h1>Dungeon Master Tools</h1>
 
-      {/* Create buttons (existing) */}
-      <div style={{ marginBottom: '0.75rem' }}>
-        <button onClick={() => {
-          const name = (prompt('Name for character?') || '').trim();
-          if (!name) return;
-          const raceNames = Object.keys(races);
-          const racePick = prompt(`Choose race (exact):\n${raceNames.join(', ')}`, raceNames[0]) || raceNames[0];
-          if (!races[racePick]) return alert('Race not found.');
-          const passcode = (prompt('4-digit passcode?', '0000') || '0000').slice(0,4);
-          const stats = deepClone({ str:10,dex:10,con:10,int:10,wis:10,cha:10 });
-          Object.entries(races[racePick].bonuses||{}).forEach(([k,v]) => (stats[k]+=v));
-          const base = recalcBase({ race: racePick, stats, level:1 });
-          const totals = withMods(base, { hpMod:0, barMod:0, reflexMod:0 });
-          const char = {
-            id: Date.now().toString(),
-            name,
-            passcode,
-            race: racePick,
-            stats,
-            level: 1,
-            sp: races[racePick].sp,
-            ...base,
-            ...totals,
-            hpMod:0, barMod:0, reflexMod:0,
-            fruit: null,
-            currentHp: totals.hp,
-            currentBar: totals.bar,
-            equipment: [],
-            activeEffects: [],
-            skills: [],
-            hidden: false,
-            meleeText: '1d6',
-            meleeBonus: modFromScore(stats.str),
-          };
-          supabase.from('characters').insert({ id: char.id, data: char }).then(({error})=>{
-            if (error) return alert('Create failed.');
-            setCharList((prev)=>[...prev,char]);
-          });
-        }}>Create Custom</button>
-        <button onClick={()=>{
-          // keep your existing Create Random if you prefer;
-          // omitted here for brevity
-          alert('Use your existing Create Random; unchanged by this patch.');
-        }}>Create Random</button>
+      <div style={{ marginBottom: 12 }}>
+        <button onClick={createCustom} style={{ marginRight: 8 }}>Create Custom</button>
+        <button onClick={createRandom}>Create Random</button>
       </div>
 
-      {charList.map((char) => {
-        const isOpen = !!expanded[char.id];
-        const base = recalcBase(char);
-        const totals = withMods(base, char);
+      <p style={{ color: '#666' }}>Administer characters below.</p>
 
-        return (
-          <div key={char.id} style={{ border: '1px solid #ddd', marginBottom: '1rem', padding: '0.5rem' }}>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button onClick={() => adminDelete(char)}>Delete</button>
+      <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
+        {charList.map((char) => (
+          <li key={char.id} style={{ marginBottom: '0.9rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button onClick={() => toggleExpand(char.id)} style={{ minWidth: 260, textAlign: 'left' }}>
+                {char.name} ({char.race}) (Level {char.level})
+              </button>
+              <button onClick={() => adminDelete(char)} style={{ background: '#fdeaea' }}>Delete</button>
               <button onClick={() => adminCopy(char)}>Copy</button>
               <button onClick={() => adminLevelAdjust(char, +1)}>Lvl +</button>
               <button onClick={() => adminLevelAdjust(char, -1)}>Lvl -</button>
@@ -194,69 +241,91 @@ export default function DmTools({ charList, setCharList, onBack, onOpenSheet }) 
               <button onClick={() => adminSpAdjust(char, -1)}>SP -</button>
               <button onClick={() => adminModifyFruit(char)}>Modify DevilFruit</button>
               <button onClick={() => onOpenSheet(char)}>View Sheet</button>
-              <label style={{ marginLeft: '0.5rem' }}>
+              <label style={{ marginLeft: 8 }}>
                 <input type="checkbox" checked={!!char.hidden} onChange={() => toggleHidden(char)} /> Hidden
               </label>
-              <button style={{ marginLeft: 'auto' }} onClick={() => toggleExpand(char.id)}>{isOpen ? 'Collapse' : 'Expand'}</button>
             </div>
 
-            {isOpen && (
-              <div style={{ marginTop: '0.5rem' }}>
-                {/* Core — now shows BASE and MODS separately */}
-                <fieldset style={{ marginBottom: '0.75rem' }}>
-                  <legend>Core</legend>
+            {expanded[char.id] && (
+              <div style={{ border: '1px solid #ddd', padding: 12, marginTop: 8, borderRadius: 6 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(260px, 1fr))', gap: 12 }}>
+                  <div>
+                    <h4 style={{ marginTop: 0 }}>Core</h4>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Max Health:</strong>{' '}
+                      <input style={{ width: 80 }} type="number" value={char.hp || 0}
+                        onChange={(e) => setNumField(char, 'hp', Number(e.target.value))} />
+                      <button onClick={() => nudgeNumField(char, 'hp', +1)} style={{ marginLeft: 6 }}>+</button>
+                      <button onClick={() => nudgeNumField(char, 'hp', -1)} style={{ marginLeft: 4 }}>-</button>
+                    </div>
 
-                  <div style={{ marginBottom: '0.4rem' }}>
-                    <strong>Max Health:</strong>
-                    <span style={{ marginLeft: 8 }}>Base {base.baseHp}</span>
-                    <span style={{ marginLeft: 8 }}>Mod {char.hpMod || 0}</span>
-                    <span style={{ marginLeft: 8 }}>= <strong>{totals.hp}</strong></span>
-                    <span style={{ marginLeft: 8 }}>
-                      <button onClick={() => bumpMod(char, 'hpMod', +1)}>+</button>
-                      <button onClick={() => bumpMod(char, 'hpMod', +5)} style={{ marginLeft: 4 }}>+5</button>
-                      <button onClick={() => bumpMod(char, 'hpMod', -5)} style={{ marginLeft: 4 }}>-5</button>
-                      <button onClick={() => setModFromPrompt(char, 'hpMod', 'HP')} style={{ marginLeft: 4 }}>Set…</button>
-                    </span>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Max Bar:</strong>{' '}
+                      <input style={{ width: 80 }} type="number" value={char.bar || 0}
+                        onChange={(e) => setNumField(char, 'bar', Number(e.target.value))} />
+                      <button onClick={() => nudgeNumField(char, 'bar', +5)} style={{ marginLeft: 6 }}>+5</button>
+                      <button onClick={() => nudgeNumField(char, 'bar', -5)} style={{ marginLeft: 4 }}>-5</button>
+                    </div>
+
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Reflex:</strong>{' '}
+                      <input style={{ width: 80 }} type="number" value={char.reflex || 0}
+                        onChange={(e) => setNumField(char, 'reflex', Number(e.target.value))} />
+                      <button onClick={() => nudgeNumField(char, 'reflex', +1)} style={{ marginLeft: 6 }}>+</button>
+                      <button onClick={() => nudgeNumField(char, 'reflex', -1)} style={{ marginLeft: 4 }}>-</button>
+                    </div>
+
+                    <h4>Melee</h4>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Dice:</strong>{' '}
+                      <input style={{ width: 100 }} value={char.meleeText || '1d6'}
+                        onChange={(e) => setMeleeText(char, e.target.value)} />
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Bonus:</strong>{' '}
+                      <input style={{ width: 80 }} type="number" value={Number(char.meleeBonus || 0)}
+                        onChange={(e) => setMeleeBonus(char, Number(e.target.value))} />
+                      <span style={{ marginLeft: 6, color: '#555' }}>
+                        (Sheet shows: {char.meleeText || '1d6'} + {Number(char.meleeBonus || 0)})
+                      </span>
+                    </div>
+
+                    <h4>Skill Points</h4>
+                    <div>
+                      <input style={{ width: 80 }} type="number" value={Number(char.sp || 0)}
+                        onChange={(e) => setNumField(char, 'sp', Number(e.target.value))} />
+                      <button onClick={() => adminSpAdjust(char, +1)} style={{ marginLeft: 6 }}>
+                        SP +
+                      </button>
+                      <button onClick={() => adminSpAdjust(char, -1)} style={{ marginLeft: 4 }}>
+                        SP -
+                      </button>
+                    </div>
                   </div>
 
-                  <div style={{ marginBottom: '0.4rem' }}>
-                    <strong>Max Bar:</strong>
-                    <span style={{ marginLeft: 8 }}>Base {base.baseBar}</span>
-                    <span style={{ marginLeft: 8 }}>Mod {char.barMod || 0}</span>
-                    <span style={{ marginLeft: 8 }}>= <strong>{totals.bar}</strong></span>
-                    <span style={{ marginLeft: 8 }}>
-                      <button onClick={() => bumpMod(char, 'barMod', +1)}>+</button>
-                      <button onClick={() => bumpMod(char, 'barMod', +5)} style={{ marginLeft: 4 }}>+5</button>
-                      <button onClick={() => bumpMod(char, 'barMod', -5)} style={{ marginLeft: 4 }}>-5</button>
-                      <button onClick={() => setModFromPrompt(char, 'barMod', 'Bar')} style={{ marginLeft: 4 }}>Set…</button>
-                    </span>
+                  <div>
+                    <h4 style={{ marginTop: 0 }}>Ability Modifiers (DM view)</h4>
+                    {['cha', 'con', 'dex', 'int', 'str', 'wis'].map((k) => {
+                      const currentScore = char.stats?.[k] ?? 10;
+                      const currentMod = modFromScore(currentScore);
+                      return (
+                        <div key={k} style={{ marginBottom: 8 }}>
+                          <strong style={{ textTransform: 'uppercase' }}>{k}</strong>: {currentMod}{' '}
+                          <button onClick={() => adjustMod(char, k, +1)} style={{ marginLeft: 6 }}>+</button>
+                          <button onClick={() => adjustMod(char, k, -1)} style={{ marginLeft: 4 }}>-</button>
+                          <span style={{ marginLeft: 8, color: '#666' }}>
+                            (score {currentScore}, mod changes ±1 adjust score ±2)
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  <div style={{ marginBottom: '0.4rem' }}>
-                    <strong>Reflex:</strong>
-                    <span style={{ marginLeft: 8 }}>Base {base.baseReflex}</span>
-                    <span style={{ marginLeft: 8 }}>Mod {char.reflexMod || 0}</span>
-                    <span style={{ marginLeft: 8 }}>= <strong>{totals.reflex}</strong></span>
-                    <span style={{ marginLeft: 8 }}>
-                      <button onClick={() => bumpMod(char, 'reflexMod', +1)}>+</button>
-                      <button onClick={() => bumpMod(char, 'reflexMod', +5)} style={{ marginLeft: 4 }}>+5</button>
-                      <button onClick={() => bumpMod(char, 'reflexMod', -5)} style={{ marginLeft: 4 }}>-5</button>
-                      <button onClick={() => setModFromPrompt(char, 'reflexMod', 'Reflex')} style={{ marginLeft: 4 }}>Set…</button>
-                    </span>
-                  </div>
-
-                  <div style={{ color: '#666', fontSize: 12, marginTop: 6 }}>
-                    DM modifiers are <em>flat additions</em> that persist across level changes. (Base is recalculated from race, stats, and level; then the
-                    modifier is applied.) 
-                  </div>
-                </fieldset>
-
-                {/* (Rest of your DM panel: melee, dice, bonuses, ability +/-, etc. stays the same) */}
+                </div>
               </div>
             )}
-          </div>
-        );
-      })}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
