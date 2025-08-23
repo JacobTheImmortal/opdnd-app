@@ -8,7 +8,9 @@ import { defaultActions } from './actionsUtils';
 import EquipmentSheet from './EquipmentSheet';
 import { equipmentList } from './equipmentData';
 import Overview from './Overview';
-// NEW: Use your JSON-backed actions first, then fall back to our resilient inline map
+
+// NEW: imports to keep App lean
+import DmTools from './DmTools';
 import { getFruitActions } from './devilFruitActions';
 
 /* ----------------------------------
@@ -21,7 +23,6 @@ async function saveCharacter(character) {
   const { error } = await supabase.from('characters').upsert({ id: character.id, data: character });
   if (error) console.error('❌ Error saving character:', error);
 }
-
 function uniqueBy(arr, keyFn) {
   const seen = new Set();
   return arr.filter((item) => {
@@ -58,177 +59,6 @@ const modFromScore = (score) => Math.floor((Number(score || 10) - 10) / 2);
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n || 0));
 
 /* ----------------------------------
-   Devil Fruit action resolution (robust)
------------------------------------*/
-
-/** Canonicalize fruit names: strip parens like (Logia), collapse spaces, lower-case, remove obvious noise words */
-function canonFruitName(name) {
-  return String(name || '')
-    .toLowerCase()
-    .replace(/\([^)]*\)/g, ' ')      // remove parenthetical bits like (Logia)
-    .replace(/model\s+[a-z]+/g, ' ') // ignore model qualifiers in names
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Inline fallback table keyed by CANONICAL names.
- * Keep these simple numeric costs so they render nicely in Actions/DF tabs.
- * If a cost in your docs is “N actions”, we set barCost to 0 (you can still track AP in the UI).
- */
-const FRUIT_ACTIONS_CANON = {
-  // tired tired
-  'tired tired': [
-    { name: 'Sleep Touch', barCost: 10 },
-    { name: 'Aura of Exhaust', barCost: 0, perTurnCost: 5 },
-  ],
-
-  // air air (was previously requiring "(Logia)" to match)
-  'air air': [
-    { name: 'Snuff', barCost: 5 },
-    { name: 'Siphon', barCost: 0, perTurnCost: 10 },
-    { name: 'Flight', barCost: 10 },
-    { name: 'PushBack', barCost: 5 },
-  ],
-
-  // walk walk
-  'walk walk': [],
-
-  // glycer glycer
-  'glycer glycer': [
-    { name: 'Explode!', barCost: 20 },
-    // “Attack Bar + 5 Bar” -> we expose +5 as the explicit bar cost piece
-    { name: 'Crackle Fist', barCost: 5 },
-    { name: 'Coat', barCost: 5 },
-  ],
-
-  // survive survive
-  'survive survive': [{ name: 'Affliction absorption', barCost: 20 }],
-
-  // twin twin (3 Actions in docs -> 0 bar; AP handled by UI)
-  'twin twin': [{ name: 'Body maker', barCost: 0 }],
-
-  // water water
-  'water water': [
-    { name: 'Water Ball', barCost: 5 },
-    { name: 'Shape Water', barCost: 0, perTurnCost: 5 },
-    { name: 'Separate', barCost: 5 },
-    { name: 'Moisture Grab', barCost: 5 },
-  ],
-
-  // sound sound
-  'sound sound': [
-    { name: 'Auditory effect', barCost: 2 },
-    { name: 'Silence', barCost: 5 },
-    { name: 'Amp Up', barCost: 10 },
-  ],
-
-  // dance dance (3 Actions in docs -> 0 bar; AP handled by UI)
-  'dance dance': [{ name: 'Disco Time', barCost: 0 }],
-
-  // race race
-  'race race': [{ name: 'Race Change', barCost: 20 }],
-
-  // bear bear model panda
-  'bear bear panda': [
-    { name: 'HumanLike', barCost: 0 },
-    { name: 'Half Panda', barCost: 0, perTurnCost: 5 },
-    { name: 'Full Panda', barCost: 0, perTurnCost: 5 },
-  ],
-
-  // state state
-  'state state': [{ name: 'State Change', barCost: 15 }],
-
-  // sit sit
-  'sit sit': [{ name: 'Sit!', barCost: 10 }],
-
-  // cellar cellar
-  'cellar cellar': [
-    { name: 'Cellar Door', barCost: 20 },
-    { name: 'Cellar Reset', barCost: 20 },
-  ],
-
-  // rage rage
-  'rage rage': [{ name: 'Enrage', barCost: 0, perTurnCost: 10 }],
-
-  // potion potion
-  'potion potion': [{ name: 'Apply Effect', barCost: 15 }],
-
-  // rat rat (no explicit actions in docs)
-  'rat rat': [],
-
-  // phobia phobia
-  'phobia phobia': [
-    { name: 'Nightmare', barCost: 10 },
-    { name: 'Phobia Man', barCost: 10, perTurnCost: 5 },
-    { name: 'Overwhelm', barCost: 20 },
-  ],
-
-  // reality reality
-  'reality reality': [
-    { name: 'CUT!', barCost: 20 },
-    { name: 'Question', barCost: 30 },
-    { name: 'Look away', barCost: 30 },
-  ],
-
-  // command command
-  'command command': [{ name: 'Issue Command', barCost: 10 }],
-
-  // vector vector
-  'vector vector': [],
-
-  // pavo pavo
-  'pavo pavo': [],
-
-  // hurt hurt
-  'hurt hurt': [{ name: 'Spawn Woman', barCost: 50 }],
-};
-
-/** Given a raw fruit name, return a normalized list of action objects */
-function resolveFruitActions(rawName) {
-  if (!rawName) return [];
-  const canonical = canonFruitName(rawName);
-
-  // 1) Try JSON-backed source first (devilFruitActions.js)
-  let fromJson = getFruitActions(rawName);
-  if (!fromJson || fromJson.length === 0) {
-    // also try canonical key in case your JSON keys are already canonical
-    fromJson = getFruitActions(canonical);
-  }
-  if (fromJson && fromJson.length > 0) return fromJson.map(a => ({
-    name: a.name,
-    barCost: Number(a.barCost) || 0,
-    perTurnCost: Number(a.perTurnCost) || 0,
-  }));
-
-  // 2) Fallback to inline canonical map
-  if (FRUIT_ACTIONS_CANON[canonical]) {
-    return FRUIT_ACTIONS_CANON[canonical].map(a => ({
-      name: a.name,
-      barCost: Number(a.barCost) || 0,
-      perTurnCost: Number(a.perTurnCost) || 0,
-    }));
-  }
-
-  // 3) Last resort: try a few easy alias shapes
-  const easyAliases = [
-    canonical.replace(/\s*logia\s*$/i, '').trim(),
-    canonical.replace(/\s*model\s+\w+$/i, '').trim(),
-  ].filter(Boolean);
-
-  for (const alias of easyAliases) {
-    if (FRUIT_ACTIONS_CANON[alias]) {
-      return FRUIT_ACTIONS_CANON[alias].map(a => ({
-        name: a.name,
-        barCost: Number(a.barCost) || 0,
-        perTurnCost: Number(a.perTurnCost) || 0,
-      }));
-    }
-  }
-  return [];
-}
-
-/* ----------------------------------
    App
 -----------------------------------*/
 export default function App() {
@@ -252,9 +82,6 @@ export default function App() {
   // small inputs
   const [newActionName, setNewActionName] = useState('');
   const [newActionBarCost, setNewActionBarCost] = useState(0);
-
-  // DM tools expanded rows (id -> boolean)
-  const [dmExpanded, setDmExpanded] = useState({});
 
   // ----- Constants -----
   const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
@@ -442,14 +269,12 @@ export default function App() {
   }, [equipment]);
 
   /* ----------------------------------
-     Devil Fruit → Actions bridge (robust)
+     Devil Fruit → Actions bridge (via data module)
   -----------------------------------*/
   const devilFruitActions = useMemo(() => {
-    const fruitName = currentChar?.fruit?.name;
+    const fruitName = currentChar?.fruit?.name || '';
     if (!fruitName) return [];
-    // Resolve via JSON first, then robust fallback table
-    const list = resolveFruitActions(fruitName);
-    return list.map((a) => ({
+    return getFruitActions(fruitName).map((a) => ({
       name: a.name,
       barCost: Number(a.barCost) || 0,
       _kind: 'devilFruit',
@@ -462,6 +287,7 @@ export default function App() {
     [equipmentActions, devilFruitActions, customActions]
   );
 
+  // persistence mirrors
   const persistEquipment = (updated) => {
     setEquipment(updated);
     if (!currentChar) return;
@@ -478,187 +304,6 @@ export default function App() {
   };
 
   /* ----------------------------------
-     Admin / DM tools helpers (inline)
-  -----------------------------------*/
-  const adminDelete = async (char) => {
-    if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
-    const { error } = await supabase.from('characters').delete().eq('id', char.id);
-    if (error) {
-      alert('Delete failed.');
-      return;
-    }
-    setCharList((prev) => prev.filter((c) => c.id !== char.id));
-  };
-
-  const adminCopy = async (char) => {
-    const clone = { ...deepClone(char), id: `${Date.now()}_${Math.floor(Math.random() * 1000)}`, name: `${char.name} (Copy)` };
-    const { error } = await supabase.from('characters').insert({ id: clone.id, data: clone });
-    if (error) {
-      alert('Copy failed.');
-      return;
-    }
-    setCharList((prev) => [...prev, clone]);
-  };
-
-  const adminLevelAdjust = async (char, delta) => {
-    const updated = deepClone(char);
-    updated.level = Math.max(1, (updated.level || 1) + delta);
-    // grant/consume SP when changing level from DM controls
-    updated.sp = (updated.sp || 0) + (delta > 0 ? 3 : -3 * Math.min(1, Math.abs(delta))); // -3 per level down
-    const derived = recalcDerived(updated);
-    Object.assign(updated, derived);
-    updated.currentHp = Math.min(updated.currentHp ?? derived.hp, derived.hp);
-    updated.currentBar = Math.min(updated.currentBar ?? derived.bar, derived.bar);
-    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
-    if (error) {
-      alert('Level change failed.');
-      return;
-    }
-    setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-  };
-
-  const adminSpAdjust = async (char, delta) => {
-    const updated = deepClone(char);
-    updated.sp = Math.max(0, (updated.sp || 0) + delta);
-    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
-    if (error) {
-      alert('SP change failed.');
-      return;
-    }
-    setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-  };
-
-  const adminModifyFruit = async (char) => {
-    const current = char.fruit?.name || '';
-    const names = devilFruits.map((f) => f.name).join(', ');
-    const input = prompt(`Enter Devil Fruit name (or type 'none' to remove)\nAvailable: ${names}`, current);
-    if (input === null) return;
-    const trimmed = input.trim();
-    const updated = deepClone(char);
-    if (!trimmed || trimmed.toLowerCase() === 'none') updated.fruit = null;
-    else {
-      const found = devilFruits.find((f) => f.name.toLowerCase() === trimmed.toLowerCase());
-      if (!found) {
-        alert('Fruit not found.');
-        return;
-      }
-      updated.fruit = { name: found.name, ability: found.ability };
-    }
-    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
-    if (error) {
-      alert('Update failed.');
-      return;
-    }
-    setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-  };
-
-  const adminOpenSheet = async (char) => {
-    setCurrentChar(char);
-    setEquipment(char.equipment || []);
-    setActiveEffects(char.activeEffects || []);
-    setActionPoints(3);
-    setScreen('Main');
-    setStep(4);
-  };
-
-  const toggleHidden = async (char) => {
-    const updated = { ...char, hidden: !char.hidden };
-    const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
-    if (!error) setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-  };
-
-  const createCustom = async () => {
-    const name = (prompt('Name for character?') || '').trim();
-    if (!name) return;
-    const raceNames = Object.keys(races);
-    const racePick = prompt(`Choose race (exact):\n${raceNames.join(', ')}`, raceNames[0]) || raceNames[0];
-    if (!races[racePick]) {
-      alert('Race not found.');
-      return;
-    }
-    const fruitInput = prompt(`Devil Fruit name (or 'none')?`, 'none') || 'none';
-    const hiddenAns = (prompt(`Hidden? (yes/no)`, 'no') || 'no').toLowerCase().startsWith('y');
-    const passcode = (prompt('4-digit passcode (for player view)?', '0000') || '0000').slice(0, 4);
-
-    const baseStats = deepClone(initStats);
-    const race = races[racePick];
-    Object.entries(race.bonuses || {}).forEach(([k, v]) => (baseStats[k] += v));
-
-    const derived = calculateDerived(baseStats, 1, race);
-    const fruit =
-      fruitInput.toLowerCase() === 'none'
-        ? null
-        : (() => {
-            const f = devilFruits.find((df) => df.name.toLowerCase() === fruitInput.toLowerCase());
-            if (!f) return null;
-            return { name: f.name, ability: f.ability };
-          })();
-
-    const char = {
-      id: Date.now().toString(),
-      name,
-      passcode,
-      race: racePick,
-      stats: baseStats,
-      level: 1,
-      sp: race.sp,
-      ...derived,
-      fruit,
-      currentHp: derived.hp,
-      currentBar: derived.bar,
-      equipment: [],
-      activeEffects: [],
-      skills: [],
-      hidden: hiddenAns,
-      meleeText: '1d6',
-      meleeBonus: modFromScore(baseStats.str),
-    };
-    const { error } = await supabase.from('characters').insert({ id: char.id, data: char });
-    if (error) {
-      alert('Create failed.');
-      return;
-    }
-    setCharList((prev) => [...prev, char]);
-  };
-
-  const createRandom = async () => {
-    const raceNames = Object.keys(races);
-    const racePick = raceNames[Math.floor(Math.random() * raceNames.length)];
-    const race = races[racePick];
-    const baseStats = deepClone(initStats);
-    Object.entries(race.bonuses || {}).forEach(([k, v]) => (baseStats[k] += v));
-    // small random wiggle
-    ['str', 'dex', 'con', 'int', 'wis', 'cha'].forEach((k) => (baseStats[k] = clamp(baseStats[k] + Math.floor(Math.random() * 5) - 2, 6, 20)));
-    const derived = calculateDerived(baseStats, 1, race);
-    const fruit = Math.random() > 0.6 ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
-    const char = {
-      id: Date.now().toString(),
-      name: `NPC ${Math.floor(Math.random() * 900 + 100)}`,
-      passcode: '0000',
-      race: racePick,
-      stats: baseStats,
-      level: 1,
-      sp: race.sp,
-      ...derived,
-      fruit: fruit ? { name: fruit.name, ability: fruit.ability } : null,
-      currentHp: derived.hp,
-      currentBar: derived.bar,
-      equipment: [],
-      activeEffects: [],
-      skills: [],
-      hidden: (prompt('Create as hidden? (yes/no)', 'yes') || 'yes').toLowerCase().startsWith('y'),
-      meleeText: '1d6',
-      meleeBonus: modFromScore(baseStats.str),
-    };
-    const { error } = await supabase.from('characters').insert({ id: char.id, data: char });
-    if (error) {
-      alert('Create failed.');
-      return;
-    }
-    setCharList((prev) => [...prev, char]);
-  };
-
-  /* ----------------------------------
      Renders
   -----------------------------------*/
   // Overview page
@@ -672,198 +317,22 @@ export default function App() {
     );
   }
 
-  // DEV TOOLS (inline here; your project also has a DmTools.jsx version if you wish to swap)
+  // DEV TOOLS (now a separate component)
   if (step === 3) {
-    const toggleExpand = (id) => setDmExpanded((m) => ({ ...m, [id]: !m[id] }));
-
-    const saveInline = async (updated) => {
-      const { error } = await supabase.from('characters').upsert({ id: updated.id, data: updated });
-      if (!error) {
-        setCharList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-      }
-    };
-
-    const setNumField = (char, field, value) => {
-      const updated = deepClone(char);
-      updated[field] = Number(value || 0);
-      saveInline(updated);
-    };
-    const nudgeNumField = (char, field, delta) => {
-      const updated = deepClone(char);
-      updated[field] = Number(updated[field] || 0) + delta;
-      saveInline(updated);
-    };
-
-    const setMeleeText = (char, text) => {
-      const updated = deepClone(char);
-      updated.meleeText = (text || '1d6').trim();
-      saveInline(updated);
-    };
-    const setMeleeBonus = (char, v) => setNumField(char, 'meleeBonus', v);
-
-    const adjustMod = (char, statKey, delta) => {
-      const updated = deepClone(char);
-      updated.stats[statKey] = clamp((updated.stats[statKey] || 10) + delta * 2, 1, 30);
-      const derived = recalcDerived(updated);
-      Object.assign(updated, derived);
-      updated.currentHp = Math.min(updated.currentHp ?? derived.hp, derived.hp);
-      updated.currentBar = Math.min(updated.currentBar ?? derived.bar, derived.bar);
-      saveInline(updated);
-    };
-
     return (
-      <div style={{ padding: '1rem' }}>
-        <button onClick={() => setStep(1)}>← Back</button>
-        <h1>Dungeon Master Tools</h1>
-        <div style={{ marginBottom: 12 }}>
-          <button onClick={createCustom} style={{ marginRight: 8 }}>
-            Create Custom
-          </button>
-          <button onClick={createRandom}>Create Random</button>
-        </div>
-
-        <p style={{ color: '#666' }}>Administer characters below.</p>
-
-        <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
-          {charList.map((char) => (
-            <li key={char.id} style={{ marginBottom: '0.9rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={() => toggleExpand(char.id)} style={{ minWidth: 260, textAlign: 'left' }}>
-                  {char.name} ({char.race}) (Level {char.level})
-                </button>
-                <button onClick={() => adminDelete(char)} style={{ background: '#fdeaea' }}>
-                  Delete
-                </button>
-                <button onClick={() => adminCopy(char)}>Copy</button>
-                <button onClick={() => adminLevelAdjust(char, +1)}>Lvl +</button>
-                <button onClick={() => adminLevelAdjust(char, -1)}>Lvl -</button>
-                <button onClick={() => adminSpAdjust(char, +1)}>SP +</button>
-                <button onClick={() => adminSpAdjust(char, -1)}>SP -</button>
-                <button onClick={() => adminModifyFruit(char)}>Modify DevilFruit</button>
-                <button onClick={() => adminOpenSheet(char)}>View Sheet</button>
-                <label style={{ marginLeft: 8 }}>
-                  <input type="checkbox" checked={!!char.hidden} onChange={() => toggleHidden(char)} /> Hidden
-                </label>
-              </div>
-
-              {dmExpanded[char.id] && (
-                <div style={{ border: '1px solid #ddd', padding: 12, marginTop: 8, borderRadius: 6 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(260px, 1fr))', gap: 12 }}>
-                    <div>
-                      <h4 style={{ marginTop: 0 }}>Core</h4>
-                      <div style={{ marginBottom: 8 }}>
-                        <strong>Max Health:</strong>{' '}
-                        <input
-                          style={{ width: 80 }}
-                          type="number"
-                          value={char.hp || 0}
-                          onChange={(e) => setNumField(char, 'hp', Number(e.target.value))}
-                        />
-                        <button onClick={() => nudgeNumField(char, 'hp', +1)} style={{ marginLeft: 6 }}>
-                          +
-                        </button>
-                        <button onClick={() => nudgeNumField(char, 'hp', -1)} style={{ marginLeft: 4 }}>
-                          -
-                        </button>
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <strong>Max Bar:</strong>{' '}
-                        <input
-                          style={{ width: 80 }}
-                          type="number"
-                          value={char.bar || 0}
-                          onChange={(e) => setNumField(char, 'bar', Number(e.target.value))}
-                        />
-                        <button onClick={() => nudgeNumField(char, 'bar', +5)} style={{ marginLeft: 6 }}>
-                          +5
-                        </button>
-                        <button onClick={() => nudgeNumField(char, 'bar', -5)} style={{ marginLeft: 4 }}>
-                          -5
-                        </button>
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <strong>Reflex:</strong>{' '}
-                        <input
-                          style={{ width: 80 }}
-                          type="number"
-                          value={char.reflex || 0}
-                          onChange={(e) => setNumField(char, 'reflex', Number(e.target.value))}
-                        />
-                        <button onClick={() => nudgeNumField(char, 'reflex', +1)} style={{ marginLeft: 6 }}>
-                          +
-                        </button>
-                        <button onClick={() => nudgeNumField(char, 'reflex', -1)} style={{ marginLeft: 4 }}>
-                          -
-                        </button>
-                      </div>
-
-                      <h4>Melee</h4>
-                      <div style={{ marginBottom: 8 }}>
-                        <strong>Dice:</strong>{' '}
-                        <input
-                          style={{ width: 100 }}
-                          value={char.meleeText || '1d6'}
-                          onChange={(e) => setMeleeText(char, e.target.value)}
-                        />
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <strong>Bonus:</strong>{' '}
-                        <input
-                          style={{ width: 80 }}
-                          type="number"
-                          value={Number(char.meleeBonus || 0)}
-                          onChange={(e) => setMeleeBonus(char, Number(e.target.value))}
-                        />
-                        <span style={{ marginLeft: 6, color: '#555' }}>
-                          (Sheet shows: {char.meleeText || '1d6'} + {Number(char.meleeBonus || 0)})
-                        </span>
-                      </div>
-
-                      <h4>Skill Points</h4>
-                      <div>
-                        <input
-                          style={{ width: 80 }}
-                          type="number"
-                          value={Number(char.sp || 0)}
-                          onChange={(e) => setNumField(char, 'sp', Number(e.target.value))}
-                        />
-                        <button onClick={() => adminSpAdjust(char, +1)} style={{ marginLeft: 6 }}>
-                          SP +
-                        </button>
-                        <button onClick={() => adminSpAdjust(char, -1)} style={{ marginLeft: 4 }}>
-                          SP -
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <h4 style={{ marginTop: 0 }}>Ability Modifiers (DM view)</h4>
-                      {['cha', 'con', 'dex', 'int', 'str', 'wis'].map((k) => {
-                        const currentScore = char.stats?.[k] ?? 10;
-                        const currentMod = modFromScore(currentScore);
-                        return (
-                          <div key={k} style={{ marginBottom: 8 }}>
-                            <strong style={{ textTransform: 'uppercase' }}>{k}</strong>: {currentMod}{' '}
-                            <button onClick={() => adjustMod(char, k, +1)} style={{ marginLeft: 6 }}>
-                              +
-                            </button>
-                            <button onClick={() => adjustMod(char, k, -1)} style={{ marginLeft: 4 }}>
-                              -
-                            </button>
-                            <span style={{ marginLeft: 8, color: '#666' }}>
-                              (score {currentScore}, mod changes ±1 adjust score ±2)
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
+      <DmTools
+        charList={charList}
+        setCharList={setCharList}
+        onBack={() => setStep(1)}
+        onOpenSheet={(char) => {
+          setCurrentChar(char);
+          setEquipment(char.equipment || []);
+          setActiveEffects(char.activeEffects || []);
+          setActionPoints(3);
+          setScreen('Main');
+          setStep(4);
+        }}
+      />
     );
   }
 
@@ -887,6 +356,7 @@ export default function App() {
   if (step === 4 && currentChar) {
     return (
       <div style={{ padding: '1rem' }}>
+        {/* Back clears the open session */}
         <button
           onClick={() => {
             setCurrentChar(null);
@@ -904,9 +374,8 @@ export default function App() {
         </p>
 
         <p>
-          <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} | <strong>Bar:</strong> {currentChar.currentBar} /{' '}
-          {currentChar.bar}{' '}
-          | <strong>Reflex:</strong> {currentChar.reflex} | <strong>Melee:</strong>{' '}
+          <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} | <strong>Bar:</strong> {currentChar.currentBar} / {currentChar.bar} |{' '}
+          <strong>Reflex:</strong> {currentChar.reflex} | <strong>Melee:</strong>{' '}
           {(currentChar.meleeText || '1d6') + ' + ' + (Number(currentChar.meleeBonus || 0))}
         </p>
 
@@ -1004,6 +473,7 @@ export default function App() {
               Regain Bar
             </button>
 
+            {/* Rest buttons */}
             <div style={{ marginTop: '1rem' }}>
               <button
                 style={{ color: 'crimson', marginRight: '1rem' }}
@@ -1055,6 +525,7 @@ export default function App() {
               Take Turn
             </button>
 
+            {/* Active on Turn */}
             {activeEffects.length > 0 && (
               <div style={{ marginTop: '0.75rem', padding: '0.5rem', border: '1px dashed #aaa' }}>
                 <strong>Active on Turn</strong>
@@ -1162,12 +633,6 @@ export default function App() {
                     </ul>
                   </div>
                 )}
-                {devilFruitActions.length === 0 && (
-                  <p style={{ color: '#a00' }}>
-                    No starting actions found for this fruit. (Name matching is robust now — if you still
-                    see this, check JSON keys in <code>devilFruitActions.json</code>.)
-                  </p>
-                )}
               </>
             ) : (
               <p>No Devil Fruit.</p>
@@ -1235,6 +700,7 @@ export default function App() {
     <div style={{ padding: '1rem', position: 'relative', minHeight: '100vh' }}>
       <h1>OPDND</h1>
 
+      {/* Top-right Overview button */}
       <div style={{ position: 'fixed', right: '1rem', top: '1rem' }}>
         <button style={{ color: 'crimson' }} onClick={() => setStep(0)}>
           Overview
@@ -1268,6 +734,7 @@ export default function App() {
           ))}
       </ul>
 
+      {/* Bottom-left Dev Tool Mode */}
       <div style={{ position: 'fixed', left: '1rem', bottom: '1rem' }}>
         <button
           style={{ color: 'crimson' }}
