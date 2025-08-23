@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabaseClient';
 import { races } from './races';
@@ -9,17 +8,22 @@ import { defaultActions } from './actionsUtils';
 import EquipmentSheet from './EquipmentSheet';
 import { equipmentList } from './equipmentData';
 import Overview from './Overview';
+
+// NEW: imports to keep App lean
 import DmTools from './DmTools';
 import { getFruitActions } from './devilFruitActions';
 
-// ---------- helpers ----------
+/* ----------------------------------
+   Small helpers
+-----------------------------------*/
 const PIN_DM = '5637';
+
 async function saveCharacter(character) {
   if (!character || !character.id) return;
   const { error } = await supabase.from('characters').upsert({ id: character.id, data: character });
   if (error) console.error('❌ Error saving character:', error);
 }
-const uniqueBy = (arr, keyFn) => {
+function uniqueBy(arr, keyFn) {
   const seen = new Set();
   return arr.filter((item) => {
     const k = keyFn(item);
@@ -27,12 +31,13 @@ const uniqueBy = (arr, keyFn) => {
     seen.add(k);
     return true;
   });
-};
-const deepClone = (obj) => JSON.parse(JSON.stringify(obj));
-const modFromScore = (score) => Math.floor((Number(score || 10) - 10) / 2);
+}
+function deepClone(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
 
-// Recalc BASE (no DM mods here)
-function recalcBase(char) {
+/* Recalc derived stats for level/race/stat changes */
+function recalcDerived(char) {
   const race = races[char.race] || {};
   const stats = char.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
   const level = char.level || 1;
@@ -44,87 +49,100 @@ function recalcBase(char) {
   const hp = calculateMaxHealth(baseHP, con, level);
   const bar = calculateMaxBar(baseBar, int, wis, level);
   const reflex = (race.reflex || 5) + Math.floor(stats.dex / 5) + Math.floor(level / 3);
-  return { baseHp: hp, baseBar: bar, baseReflex: reflex };
+  return { hp, bar, reflex };
 }
 
-// Apply DM mods to base, clamp to minimums
-function applyDmMods(base, mods) {
-  const hpMod = Number(mods.hpMod || 0);
-  const barMod = Number(mods.barMod || 0);
-  const reflexMod = Number(mods.reflexMod || 0);
-  return {
-    hp: Math.max(1, (base.baseHp || 1) + hpMod),
-    bar: Math.max(0, (base.baseBar || 0) + barMod),
-    reflex: Math.max(0, (base.baseReflex || 0) + reflexMod),
-  };
-}
+/* Derive a modifier from a raw ability score */
+const modFromScore = (score) => Math.floor((Number(score || 10) - 10) / 2);
 
+/* Clamp utility */
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n || 0));
+
+/* ----------------------------------
+   App
+-----------------------------------*/
 export default function App() {
-  // ---- app state ----
-  const [step, setStep] = useState(1); // 0 Overview, 1 Home, 2 Choose Race, 3 DevTools, 4 Sheet
+  // ----- Top-level state -----
+  const [step, setStep] = useState(1); // 0: Overview, 1: Home, 2: Choose Race, 3: DevTools, 4: Sheet
   const [charList, setCharList] = useState([]);
   const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
 
+  // sheet UI state
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
   const [actionPoints, setActionPoints] = useState(3);
   const [customActions, setCustomActions] = useState([]);
 
+  // equipment mirror for sheet
   const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
-  const [activeEffects, setActiveEffects] = useState([]);
+  const [activeEffects, setActiveEffects] = useState([]); // [{ name, perTurnCost }]
 
+  // small inputs
   const [newActionName, setNewActionName] = useState('');
   const [newActionBarCost, setNewActionBarCost] = useState(0);
 
+  // ----- Constants -----
   const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
-  // ---- load characters ----
+  const calculateDerived = (stats, level = 1, race = {}) => {
+    const baseHP = race.hp || 20;
+    const baseBar = race.bar || 100;
+    const con = stats.con || 10;
+    const int = stats.int || 10;
+    const wis = stats.wis || 10;
+    const hp = calculateMaxHealth(baseHP, con, level);
+    const bar = calculateMaxBar(baseBar, int, wis, level);
+    const reflex = (race.reflex || 5) + Math.floor(stats.dex / 5) + Math.floor(level / 3);
+    return { hp, bar, reflex };
+  };
+
+  /* ----------------------------------
+     Load characters (no auto-open)
+  -----------------------------------*/
   useEffect(() => {
-    (async () => {
+    const fetchCharacters = async () => {
       const { data, error } = await supabase.from('characters').select('*');
-      if (error) return console.error('Failed to fetch characters:', error);
-      const parsed = (data || []).map((row) => row.data);
-      setCharList(parsed);
-    })();
+      if (error) {
+        console.error('Failed to fetch characters:', error);
+        return;
+      }
+      if (data) {
+        const parsed = data.map((row) => row.data);
+        setCharList(parsed);
+      }
+    };
+    fetchCharacters();
   }, []);
 
-  // ---- helpers to recalc & persist a character (respecting DM mods) ----
-  const recalcAndPersist = (rawChar) => {
-    const c = deepClone(rawChar);
-    // ensure modifiers exist
-    c.hpMod = Number(c.hpMod || 0);
-    c.barMod = Number(c.barMod || 0);
-    c.reflexMod = Number(c.reflexMod || 0);
-
-    const base = recalcBase(c);
-    const withMods = applyDmMods(base, c);
-    c.hp = withMods.hp;
-    c.bar = withMods.bar;
-    c.reflex = withMods.reflex;
-
-    // clamp current pools
-    c.currentHp = Math.min(Math.max(0, c.currentHp ?? c.hp), c.hp);
-    c.currentBar = Math.min(Math.max(0, c.currentBar ?? c.bar), c.bar);
-    setCurrentChar(c);
-    saveCharacter(c);
-    return c;
-  };
-
+  /* ----------------------------------
+     Loader for a specific character
+  -----------------------------------*/
   const loadCharacter = async (id) => {
     const { data, error } = await supabase.from('characters').select('*').eq('id', id).single();
-    if (error || !data?.data) return console.error('❌ Error loading character:', error);
-    const c = data.data;
-    recalcAndPersist(c);
-    setEquipment(c.equipment?.length ? c.equipment : [{ name: '', quantity: 1, customDesc: '' }]);
-    setActiveEffects(c.activeEffects || []);
-    setActionPoints(3);
-    setScreen('Main');
-    setStep(4);
+    if (error) {
+      console.error('❌ Error loading character:', error);
+      return;
+    }
+    if (data && data.data) {
+      const loaded = data.data;
+      setCurrentChar(loaded);
+      setEquipment(
+        loaded.equipment && Array.isArray(loaded.equipment) && loaded.equipment.length
+          ? loaded.equipment
+          : [{ name: '', quantity: 1, customDesc: '' }]
+      );
+      setActionPoints(3);
+      setActiveEffects(loaded.activeEffects || []);
+      setScreen('Main');
+      setStep(4);
+    }
   };
 
-  // ---- create flow ----
+  /* ----------------------------------
+     Create → choose race
+  -----------------------------------*/
   const startCreation = (e) => {
     e.preventDefault();
     const { name, fruit, passcode } = {
@@ -132,7 +150,10 @@ export default function App() {
       fruit: e.target.fruit.checked,
       passcode: e.target.passcode.value.trim(),
     };
-    if (!name || passcode.length !== 4) return alert('Enter a name and a 4-digit passcode');
+    if (!name || passcode.length !== 4) {
+      alert('Enter a name and a 4-digit passcode');
+      return;
+    }
     setNewChar({ name, passcode, fruit });
     setStep(2);
   };
@@ -142,27 +163,19 @@ export default function App() {
     const stats = { ...initStats };
     Object.entries(race.bonuses || {}).forEach(([k, v]) => (stats[k] += v));
     const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
-
-    const base = recalcBase({ race: raceKey, stats, level: 1 });
-    const mods = { hpMod: 0, barMod: 0, reflexMod: 0 }; // start clean for new chars
-    const totals = applyDmMods(base, mods);
-
+    const level = 1;
+    const derived = calculateDerived(stats, level, race);
     const char = {
       ...newChar,
       id: Date.now().toString(),
       race: raceKey,
       stats,
-      level: 1,
+      level,
       sp: race.sp,
-      // base + totals saved in case you want to show base later in DM
-      ...base,
-      ...totals,
-      hpMod: 0,
-      barMod: 0,
-      reflexMod: 0,
+      ...derived,
       fruit,
-      currentHp: totals.hp,
-      currentBar: totals.bar,
+      currentHp: derived.hp,
+      currentBar: derived.bar,
       equipment: [],
       activeEffects: [],
       skills: [],
@@ -180,17 +193,50 @@ export default function App() {
     saveCharacter(char);
   };
 
-  // ---- stat increase & level up respect DM mods ----
+  /* ----------------------------------
+     Enter / delete from Home
+  -----------------------------------*/
+  const enterChar = async (char) => {
+    const pass = prompt('Enter 4-digit passcode');
+    if (pass === char.passcode) {
+      await loadCharacter(char.id);
+    } else {
+      alert('Incorrect passcode');
+    }
+  };
+
+  const deleteCharacter = async (char) => {
+    const pass = prompt(`Enter 4-digit passcode to DELETE "${char.name}"`);
+    if (pass !== char.passcode) {
+      alert('Incorrect passcode');
+      return;
+    }
+    if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
+    const { error } = await supabase.from('characters').delete().eq('id', char.id);
+    if (error) {
+      console.error('❌ Error deleting character:', error);
+      alert('Failed to delete character.');
+      return;
+    }
+    setCharList((prev) => prev.filter((c) => c.id !== char.id));
+    if (currentChar?.id === char.id) {
+      setCurrentChar(null);
+      setStep(1);
+    }
+  };
+
+  /* ----------------------------------
+     Sheet: Stats & level
+  -----------------------------------*/
   const increaseStat = (stat) => {
     if (!currentChar || currentChar.sp <= 0) return;
     const updated = deepClone(currentChar);
     updated.stats[stat]++;
     updated.sp--;
-    const base = recalcBase(updated);
-    const totals = applyDmMods(base, updated);
-    Object.assign(updated, base, totals);
-    updated.currentHp = Math.min(updated.currentHp, updated.hp);
-    updated.currentBar = Math.min(updated.currentBar, updated.bar);
+    const derived = calculateDerived(updated.stats, updated.level, races[updated.race]);
+    Object.assign(updated, derived);
+    updated.currentHp = Math.min(updated.currentHp, derived.hp);
+    updated.currentBar = Math.min(updated.currentBar, derived.bar);
     setCurrentChar(updated);
     saveCharacter(updated);
   };
@@ -199,28 +245,32 @@ export default function App() {
     if (!currentChar) return;
     const updated = deepClone(currentChar);
     updated.level++;
-    updated.sp += 3;
-    const base = recalcBase(updated);
-    const totals = applyDmMods(base, updated);
-    Object.assign(updated, base, totals);
-    updated.currentHp = updated.hp;
-    updated.currentBar = updated.bar;
+    updated.sp += 3; // level up grants 3 SP
+    const derived = calculateDerived(updated.stats, updated.level, races[updated.race]);
+    Object.assign(updated, derived);
+    updated.currentHp = derived.hp;
+    updated.currentBar = derived.bar;
     setCurrentChar(updated);
     saveCharacter(updated);
     setActionPoints(3);
   };
 
-  // ---- equipment/fruit actions (unchanged) ----
+  /* ----------------------------------
+     Equipment → Actions bridge
+  -----------------------------------*/
   const equipmentActions = useMemo(() => {
     const names = equipment.filter((it) => it && it.name && it.name !== '').map((it) => it.name);
     const distinct = uniqueBy(names, (n) => n);
     return distinct.map((n) => {
       const meta = equipmentList.find((e) => e.name === n) || {};
-      const cost = Number(meta.useCost) || 0;
+      const cost = Number(meta.useCost) || 0; // default 0
       return { name: `Use ${n}`, barCost: cost, _kind: 'equipment', itemName: n };
     });
   }, [equipment]);
 
+  /* ----------------------------------
+     Devil Fruit → Actions bridge (via data module)
+  -----------------------------------*/
   const devilFruitActions = useMemo(() => {
     const fruitName = currentChar?.fruit?.name || '';
     if (!fruitName) return [];
@@ -237,7 +287,7 @@ export default function App() {
     [equipmentActions, devilFruitActions, customActions]
   );
 
-  // ---- persist mirrors for equipment/effects ----
+  // persistence mirrors
   const persistEquipment = (updated) => {
     setEquipment(updated);
     if (!currentChar) return;
@@ -275,10 +325,9 @@ export default function App() {
         setCharList={setCharList}
         onBack={() => setStep(1)}
         onOpenSheet={(char) => {
-          // ensure mods are respected on open
-          const c = recalcAndPersist(char);
-          setEquipment(c.equipment || []);
-          setActiveEffects(c.activeEffects || []);
+          setCurrentChar(char);
+          setEquipment(char.equipment || []);
+          setActiveEffects(char.activeEffects || []);
           setActionPoints(3);
           setScreen('Main');
           setStep(4);
