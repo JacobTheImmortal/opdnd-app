@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabaseClient';
 import { races } from './races';
@@ -13,11 +14,13 @@ import { getFruitActions } from './devilFruitActions';
 
 // ---------- helpers ----------
 const PIN_DM = '5637';
+
 async function saveCharacter(character) {
   if (!character || !character.id) return;
   const { error } = await supabase.from('characters').upsert({ id: character.id, data: character });
   if (error) console.error('❌ Error saving character:', error);
 }
+
 const uniqueBy = (arr, keyFn) => {
   const seen = new Set();
   return arr.filter((item) => {
@@ -69,7 +72,10 @@ export default function App() {
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
   const [actionPoints, setActionPoints] = useState(3);
-  const [customActions, setCustomActions] = useState([]);
+
+  // actions state (and persistence)
+  const [customActions, setCustomActions] = useState([]); // [{name, barCost}]
+  const [actionCostMods, setActionCostMods] = useState({}); // { [actionName]: number }
 
   const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
   const [activeEffects, setActiveEffects] = useState([]);
@@ -79,7 +85,7 @@ export default function App() {
 
   const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
-  // ---- load characters ----
+  // ---- load characters (list) ----
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase.from('characters').select('*');
@@ -92,9 +98,14 @@ export default function App() {
   // ---- helpers to recalc & persist a character (respecting DM mods) ----
   const recalcAndPersist = (rawChar) => {
     const c = deepClone(rawChar);
+    // ensure modifiers exist
     c.hpMod = Number(c.hpMod || 0);
     c.barMod = Number(c.barMod || 0);
     c.reflexMod = Number(c.reflexMod || 0);
+
+    // ensure action persistence fields exist
+    c.customActions = Array.isArray(c.customActions) ? c.customActions : [];
+    c.actionCostMods = c.actionCostMods && typeof c.actionCostMods === 'object' ? c.actionCostMods : {};
 
     const base = recalcBase(c);
     const withMods = applyDmMods(base, c);
@@ -102,42 +113,43 @@ export default function App() {
     c.bar = withMods.bar;
     c.reflex = withMods.reflex;
 
+    // clamp current pools
     c.currentHp = Math.min(Math.max(0, c.currentHp ?? c.hp), c.hp);
     c.currentBar = Math.min(Math.max(0, c.currentBar ?? c.bar), c.bar);
 
-    // carry melee defaults if missing
-    if (!c.meleeText) c.meleeText = '1d6';
-    if (typeof c.meleeBonus !== 'number') c.meleeBonus = modFromScore(c.stats?.str || 10);
-
     setCurrentChar(c);
+    setCustomActions(c.customActions);
+    setActionCostMods(c.actionCostMods);
     saveCharacter(c);
     return c;
   };
 
-  // ---- home-page actions ----
-  const enterChar = async (char) => {
-    const code = prompt('Enter 4-digit passcode to open character:');
-    if (code !== char.passcode) {
-      alert('Incorrect passcode.');
-      return;
-    }
-    const c = recalcAndPersist(char);
-    setEquipment(c.equipment?.length ? c.equipment : [{ name: '', quantity: 1, customDesc: '' }]);
-    setActiveEffects(c.activeEffects || []);
+  const loadCharacter = async (id) => {
+    const { data, error } = await supabase.from('characters').select('*').eq('id', id).single();
+    if (error || !data?.data) return console.error('❌ Error loading character:', error);
+    const c = data.data;
+    const full = recalcAndPersist(c);
+    setEquipment(full.equipment?.length ? full.equipment : [{ name: '', quantity: 1, customDesc: '' }]);
+    setActiveEffects(full.activeEffects || []);
     setActionPoints(3);
     setScreen('Main');
     setStep(4);
   };
 
+  // Home helpers (restore buttons)
+  const enterChar = (char) => loadCharacter(char.id);
   const deleteCharacter = async (char) => {
-    if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${char.name}? This cannot be undone.`)) return;
     const { error } = await supabase.from('characters').delete().eq('id', char.id);
     if (error) {
       alert('Delete failed.');
       return;
     }
     setCharList((prev) => prev.filter((c) => c.id !== char.id));
-    if (currentChar?.id === char.id) setCurrentChar(null);
+    if (currentChar?.id === char.id) {
+      setCurrentChar(null);
+      setStep(1);
+    }
   };
 
   // ---- create flow ----
@@ -160,7 +172,7 @@ export default function App() {
     const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
 
     const base = recalcBase({ race: raceKey, stats, level: 1 });
-    const mods = { hpMod: 0, barMod: 0, reflexMod: 0 }; // start clean for new chars
+    const mods = { hpMod: 0, barMod: 0, reflexMod: 0 }; // start clean
     const totals = applyDmMods(base, mods);
 
     const char = {
@@ -184,41 +196,48 @@ export default function App() {
       hidden: false,
       meleeText: '1d6',
       meleeBonus: modFromScore(stats.str || 10),
+
+      // actions persistence
+      customActions: [],
+      actionCostMods: {},
     };
     setCharList((prev) => [...prev, char]);
     setCurrentChar(char);
     setEquipment([]);
     setActiveEffects([]);
+    setCustomActions([]);
+    setActionCostMods({});
     setActionPoints(3);
     setScreen('Main');
     setStep(4);
     saveCharacter(char);
   };
 
-  // ---- stat increase & level up respect DM mods ----
-  const increaseStat = (stat) => {
-    if (!currentChar || currentChar.sp <= 0) return;
-    const updated = deepClone(currentChar);
-    updated.stats[stat] = Number(updated.stats[stat] || 10) + 1;
-    updated.sp--;
+  // ---- stat increase & level up (respect DM mods) ----
+  const bumpAndPersistFrom = (updated) => {
     const base = recalcBase(updated);
     const totals = applyDmMods(base, updated);
     Object.assign(updated, base, totals);
-    updated.currentHp = Math.min(updated.currentHp, updated.hp);
-    updated.currentBar = Math.min(updated.currentBar, updated.bar);
-    // keep meleeBonus tied to STR mod if it was previously derived
-    if (typeof updated.meleeBonus !== 'number' || Number.isNaN(updated.meleeBonus)) {
-      updated.meleeBonus = modFromScore(updated.stats.str);
-    }
+    updated.currentHp = Math.min(updated.currentHp ?? totals.hp, totals.hp);
+    updated.currentBar = Math.min(updated.currentBar ?? totals.bar, totals.bar);
     setCurrentChar(updated);
     saveCharacter(updated);
+  };
+
+  const increaseStat = (stat) => {
+    if (!currentChar || currentChar.sp <= 0) return;
+    const updated = deepClone(currentChar);
+    updated.stats[stat] = (updated.stats[stat] || 10) + 1;
+    updated.sp--;
+    bumpAndPersistFrom(updated);
   };
 
   const levelUp = () => {
     if (!currentChar) return;
     const updated = deepClone(currentChar);
-    updated.level = Number(updated.level || 1) + 1;
-    updated.sp = Number(updated.sp || 0) + 3;
+    updated.level++;
+    updated.sp = (updated.sp || 0) + 3;
+    // full restore on level up
     const base = recalcBase(updated);
     const totals = applyDmMods(base, updated);
     Object.assign(updated, base, totals);
@@ -229,7 +248,7 @@ export default function App() {
     setActionPoints(3);
   };
 
-  // ---- equipment/fruit actions ----
+  // ---- equipment & devil fruit -> actions ----
   const equipmentActions = useMemo(() => {
     const names = equipment.filter((it) => it && it.name && it.name !== '').map((it) => it.name);
     const distinct = uniqueBy(names, (n) => n);
@@ -251,12 +270,24 @@ export default function App() {
     }));
   }, [currentChar]);
 
-  const actionsToShow = useMemo(
+  // Merge actions (default + equipment + fruit + custom)
+  const actionsMerged = useMemo(
     () => [...defaultActions, ...equipmentActions, ...devilFruitActions, ...customActions],
     [equipmentActions, devilFruitActions, customActions]
   );
 
-  // ---- persist mirrors for equipment/effects ----
+  // Compute final actions with cost modifiers applied
+  const actionsToShow = useMemo(() => {
+    const mods = actionCostMods || {};
+    return actionsMerged.map((a) => {
+      const mod = Number(mods[a.name] || 0);
+      const baseCost = Number(a.barCost || 0);
+      const finalCost = Math.max(0, baseCost + mod);
+      return { ...a, _baseCost: baseCost, _mod: mod, barCost: finalCost };
+    });
+  }, [actionsMerged, actionCostMods]);
+
+  // ---- persistence mirrors for equipment/effects ----
   const persistEquipment = (updated) => {
     setEquipment(updated);
     if (!currentChar) return;
@@ -270,6 +301,23 @@ export default function App() {
     const updatedChar = { ...currentChar, activeEffects: updated };
     setCurrentChar(updatedChar);
     saveCharacter(updatedChar);
+  };
+
+  // ---- actions persistence helpers ----
+  const persistActionMods = (nextMods) => {
+    setActionCostMods(nextMods);
+    if (!currentChar) return;
+    const updated = { ...currentChar, actionCostMods: nextMods };
+    setCurrentChar(updated);
+    saveCharacter(updated);
+  };
+
+  const persistCustomActions = (nextCustom) => {
+    setCustomActions(nextCustom);
+    if (!currentChar) return;
+    const updated = { ...currentChar, customActions: nextCustom };
+    setCurrentChar(updated);
+    saveCharacter(updated);
   };
 
   /* ----------------------------------
@@ -286,7 +334,7 @@ export default function App() {
     );
   }
 
-  // DEV TOOLS (separate component)
+  // DEV TOOLS
   if (step === 3) {
     return (
       <DmTools
@@ -294,9 +342,12 @@ export default function App() {
         setCharList={setCharList}
         onBack={() => setStep(1)}
         onOpenSheet={(char) => {
+          // ensure mods & actions are respected on open
           const c = recalcAndPersist(char);
           setEquipment(c.equipment || []);
           setActiveEffects(c.activeEffects || []);
+          setCustomActions(c.customActions || []);
+          setActionCostMods(c.actionCostMods || {});
           setActionPoints(3);
           setScreen('Main');
           setStep(4);
@@ -515,9 +566,27 @@ export default function App() {
               </div>
             )}
 
+            {/* All actions (with per-action Mod + Use; delete for custom) */}
             {actionsToShow.map((action, i) => (
               <div key={`${action.name}-${i}`} style={{ marginTop: '0.5rem' }}>
-                <strong>{action.name}</strong> – {action.barCost} Bar
+                <strong>{action.name}</strong> — Base {action._baseCost} Bar
+                <span style={{ marginLeft: '0.75rem' }}>
+                  Mod&nbsp;
+                  <input
+                    type="number"
+                    value={action._mod}
+                    onChange={(e) => {
+                      const val = Number(e.target.value || 0);
+                      const next = { ...(actionCostMods || {}) };
+                      next[action.name] = val;
+                      persistActionMods(next);
+                    }}
+                    style={{ width: 60 }}
+                  />
+                </span>
+                <span style={{ marginLeft: '0.75rem' }}>
+                  Final: <strong>{action.barCost}</strong> Bar
+                </span>
                 <button
                   onClick={() => {
                     const cost = action.barCost || 0;
@@ -544,6 +613,23 @@ export default function App() {
                 >
                   Use
                 </button>
+
+                {/* Delete only for custom actions */}
+                {customActions.some((c) => c.name === action.name) && (
+                  <button
+                    style={{ marginLeft: '0.5rem', background: '#fbe9e9', border: '1px solid #e57373' }}
+                    onClick={() => {
+                      const next = customActions.filter((c) => c.name !== action.name);
+                      persistCustomActions(next);
+                      // also clean any explicit mod for it
+                      const mods = { ...(actionCostMods || {}) };
+                      delete mods[action.name];
+                      persistActionMods(mods);
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             ))}
 
@@ -559,12 +645,19 @@ export default function App() {
               placeholder="Bar Cost"
               value={newActionBarCost}
               onChange={(e) => setNewActionBarCost(Number(e.target.value))}
-              style={{ width: '60px', marginRight: '0.5rem' }}
+              style={{ width: '80px', marginRight: '0.5rem' }}
             />
             <button
               onClick={() => {
-                if (!newActionName) return;
-                setCustomActions((prev) => [...prev, { name: newActionName, barCost: newActionBarCost }]);
+                const name = (newActionName || '').trim();
+                if (!name) return;
+                const baseCost = Number.isFinite(newActionBarCost) ? Number(newActionBarCost) : 0;
+                const next = [...customActions, { name, barCost: baseCost, _kind: 'custom' }];
+                persistCustomActions(next);
+                // start with no mod for new custom action
+                const mods = { ...(actionCostMods || {}) };
+                if (mods[name] == null) mods[name] = 0;
+                persistActionMods(mods);
                 setNewActionName('');
                 setNewActionBarCost(0);
               }}
