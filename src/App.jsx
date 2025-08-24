@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabaseClient';
 import { races } from './races';
@@ -14,13 +13,11 @@ import { getFruitActions } from './devilFruitActions';
 
 // ---------- helpers ----------
 const PIN_DM = '5637';
-
 async function saveCharacter(character) {
   if (!character || !character.id) return;
   const { error } = await supabase.from('characters').upsert({ id: character.id, data: character });
   if (error) console.error('❌ Error saving character:', error);
 }
-
 const uniqueBy = (arr, keyFn) => {
   const seen = new Set();
   return arr.filter((item) => {
@@ -30,27 +27,22 @@ const uniqueBy = (arr, keyFn) => {
     return true;
   });
 };
-
 const deepClone = (obj) => JSON.parse(JSON.stringify(obj));
 const modFromScore = (score) => Math.floor((Number(score || 10) - 10) / 2);
 
-// Recalc BASE (no DM mods here) — must match DmTools.jsx
+// Recalc BASE (no DM mods here)
 function recalcBase(char) {
   const race = races[char.race] || {};
   const stats = char.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
   const level = char.level || 1;
-
-  const baseHP = race.hp ?? 20;
-  const baseBar = race.bar ?? 100;
-
-  const hp = calculateMaxHealth(baseHP, stats.con ?? 10, level);
-  const bar = calculateMaxBar(baseBar, stats.int ?? 10, stats.wis ?? 10, level);
-
-  const reflex =
-    (race.reflex ?? 5) +
-    Math.floor((stats.dex ?? 10) / 5) +
-    Math.floor(level / 3);
-
+  const baseHP = race.hp || 20;
+  const baseBar = race.bar || 100;
+  const con = stats.con || 10;
+  const int = stats.int || 10;
+  const wis = stats.wis || 10;
+  const hp = calculateMaxHealth(baseHP, con, level);
+  const bar = calculateMaxBar(baseBar, int, wis, level);
+  const reflex = (race.reflex || 5) + Math.floor((stats.dex || 10) / 5) + Math.floor(level / 3);
   return { baseHp: hp, baseBar: bar, baseReflex: reflex };
 }
 
@@ -100,7 +92,6 @@ export default function App() {
   // ---- helpers to recalc & persist a character (respecting DM mods) ----
   const recalcAndPersist = (rawChar) => {
     const c = deepClone(rawChar);
-    // ensure modifiers exist
     c.hpMod = Number(c.hpMod || 0);
     c.barMod = Number(c.barMod || 0);
     c.reflexMod = Number(c.reflexMod || 0);
@@ -111,25 +102,42 @@ export default function App() {
     c.bar = withMods.bar;
     c.reflex = withMods.reflex;
 
-    // clamp current pools
     c.currentHp = Math.min(Math.max(0, c.currentHp ?? c.hp), c.hp);
     c.currentBar = Math.min(Math.max(0, c.currentBar ?? c.bar), c.bar);
+
+    // carry melee defaults if missing
+    if (!c.meleeText) c.meleeText = '1d6';
+    if (typeof c.meleeBonus !== 'number') c.meleeBonus = modFromScore(c.stats?.str || 10);
 
     setCurrentChar(c);
     saveCharacter(c);
     return c;
   };
 
-  const loadCharacter = async (id) => {
-    const { data, error } = await supabase.from('characters').select('*').eq('id', id).single();
-    if (error || !data?.data) return console.error('❌ Error loading character:', error);
-    const c = data.data;
-    recalcAndPersist(c);
+  // ---- home-page actions ----
+  const enterChar = async (char) => {
+    const code = prompt('Enter 4-digit passcode to open character:');
+    if (code !== char.passcode) {
+      alert('Incorrect passcode.');
+      return;
+    }
+    const c = recalcAndPersist(char);
     setEquipment(c.equipment?.length ? c.equipment : [{ name: '', quantity: 1, customDesc: '' }]);
     setActiveEffects(c.activeEffects || []);
     setActionPoints(3);
     setScreen('Main');
     setStep(4);
+  };
+
+  const deleteCharacter = async (char) => {
+    if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
+    const { error } = await supabase.from('characters').delete().eq('id', char.id);
+    if (error) {
+      alert('Delete failed.');
+      return;
+    }
+    setCharList((prev) => prev.filter((c) => c.id !== char.id));
+    if (currentChar?.id === char.id) setCurrentChar(null);
   };
 
   // ---- create flow ----
@@ -152,7 +160,8 @@ export default function App() {
     const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
 
     const base = recalcBase({ race: raceKey, stats, level: 1 });
-    const totals = applyDmMods(base, { hpMod: 0, barMod: 0, reflexMod: 0 });
+    const mods = { hpMod: 0, barMod: 0, reflexMod: 0 }; // start clean for new chars
+    const totals = applyDmMods(base, mods);
 
     const char = {
       ...newChar,
@@ -176,7 +185,6 @@ export default function App() {
       meleeText: '1d6',
       meleeBonus: modFromScore(stats.str || 10),
     };
-
     setCharList((prev) => [...prev, char]);
     setCurrentChar(char);
     setEquipment([]);
@@ -191,13 +199,17 @@ export default function App() {
   const increaseStat = (stat) => {
     if (!currentChar || currentChar.sp <= 0) return;
     const updated = deepClone(currentChar);
-    updated.stats[stat]++;
+    updated.stats[stat] = Number(updated.stats[stat] || 10) + 1;
     updated.sp--;
     const base = recalcBase(updated);
     const totals = applyDmMods(base, updated);
     Object.assign(updated, base, totals);
     updated.currentHp = Math.min(updated.currentHp, updated.hp);
     updated.currentBar = Math.min(updated.currentBar, updated.bar);
+    // keep meleeBonus tied to STR mod if it was previously derived
+    if (typeof updated.meleeBonus !== 'number' || Number.isNaN(updated.meleeBonus)) {
+      updated.meleeBonus = modFromScore(updated.stats.str);
+    }
     setCurrentChar(updated);
     saveCharacter(updated);
   };
@@ -205,8 +217,8 @@ export default function App() {
   const levelUp = () => {
     if (!currentChar) return;
     const updated = deepClone(currentChar);
-    updated.level++;
-    updated.sp += 3;
+    updated.level = Number(updated.level || 1) + 1;
+    updated.sp = Number(updated.sp || 0) + 3;
     const base = recalcBase(updated);
     const totals = applyDmMods(base, updated);
     Object.assign(updated, base, totals);
@@ -219,9 +231,7 @@ export default function App() {
 
   // ---- equipment/fruit actions ----
   const equipmentActions = useMemo(() => {
-    const names = equipment
-      .filter((it) => it && it.name && it.name !== '')
-      .map((it) => it.name);
+    const names = equipment.filter((it) => it && it.name && it.name !== '').map((it) => it.name);
     const distinct = uniqueBy(names, (n) => n);
     return distinct.map((n) => {
       const meta = equipmentList.find((e) => e.name === n) || {};
@@ -254,36 +264,12 @@ export default function App() {
     setCurrentChar(updatedChar);
     saveCharacter(updatedChar);
   };
-
   const persistEffects = (updated) => {
     setActiveEffects(updated);
     if (!currentChar) return;
     const updatedChar = { ...currentChar, activeEffects: updated };
     setCurrentChar(updatedChar);
     saveCharacter(updatedChar);
-  };
-
-  // ---------- HOME helpers (restored so the buttons work) ----------
-  const enterChar = async (char) => {
-    const pass = prompt('Enter 4-digit passcode');
-    if (pass === char.passcode) {
-      await loadCharacter(char.id);
-    } else {
-      alert('Incorrect passcode');
-    }
-  };
-
-  const deleteCharacter = async (char) => {
-    const pass = prompt(`Enter 4-digit passcode to DELETE "${char.name}"`);
-    if (pass !== char.passcode) return alert('Incorrect passcode');
-    if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
-    const { error } = await supabase.from('characters').delete().eq('id', char.id);
-    if (error) return alert('Failed to delete character.');
-    setCharList((prev) => prev.filter((c) => c.id !== char.id));
-    if (currentChar?.id === char.id) {
-      setCurrentChar(null);
-      setStep(1);
-    }
   };
 
   /* ----------------------------------
@@ -300,7 +286,7 @@ export default function App() {
     );
   }
 
-  // DEV TOOLS
+  // DEV TOOLS (separate component)
   if (step === 3) {
     return (
       <DmTools
@@ -339,6 +325,7 @@ export default function App() {
   if (step === 4 && currentChar) {
     return (
       <div style={{ padding: '1rem' }}>
+        {/* Back clears the open session */}
         <button
           onClick={() => {
             setCurrentChar(null);
@@ -709,10 +696,7 @@ export default function App() {
               <button onClick={() => enterChar(char)}>
                 {char.name} ({char.race})
               </button>
-              <button
-                onClick={() => deleteCharacter(char)}
-                style={{ background: '#fbe9e9', border: '1px solid #e57373' }}
-              >
+              <button onClick={() => deleteCharacter(char)} style={{ background: '#fbe9e9', border: '1px solid #e57373' }}>
                 Delete
               </button>
             </li>
