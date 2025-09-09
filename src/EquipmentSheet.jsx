@@ -1,242 +1,169 @@
-import React, { useMemo } from 'react';
+// src/EquipmentSheet.jsx
+import React from 'react';
 import { equipmentList } from './equipmentData';
 
-/**
- * Small helpers
- */
-const isBlank = (v) => v === undefined || v === null || v === '' || String(v).toLowerCase() === 'n/a';
-const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+const byName = {};
+(equipmentList || []).forEach((e) => (byName[e.name] = e || {}));
 
-/** Return a normalized copy of an item row after selecting a catalog item */
-const inflateFromCatalog = (name) => {
-  const meta = equipmentList.find((e) => e.name === name) || {};
-  const hasDur = Number(meta.durability) > 0;
-  const hasAmmo = Number(meta.ammo) > 0;
-  return {
-    name,
-    quantity: 1,
-    isCustom: false,
-    // meta snapshot for rendering
-    damage: meta.damage,
-    range: meta.range,
-    weight: meta.weight,
-    growthTime: meta.growthTime,
-    yield: meta.yield,
-    // usage cost for Actions tab (App.jsx reads this off each item if present)
-    useCost: Number(meta.useCost) || 0,
-    // durability
-    maxDurability: hasDur ? Number(meta.durability) : undefined,
-    currentDurability: hasDur ? Number(meta.durability) : undefined,
-    // ammo
-    maxAmmo: hasAmmo ? Number(meta.ammo) : undefined,
-    currentAmmo: hasAmmo ? Number(meta.ammo) : undefined,
-  };
-};
-
-/** Create a custom row from user prompts */
-const makeCustomRow = () => {
-  const name = prompt('Item name?');
-  if (!name) return null;
-  const pNum = (q) => {
-    const v = prompt(q);
-    if (!v) return undefined;
-    if (String(v).trim().toLowerCase() === 'n/a') return undefined;
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : undefined;
-  };
-  const pTxt = (q) => {
-    const v = prompt(q);
-    if (!v) return undefined;
-    if (String(v).trim().toLowerCase() === 'n/a') return undefined;
-    return v;
+export default function EquipmentSheet({ equipment = [], setEquipment }) {
+  const updateItem = (idx, patch) => {
+    const next = equipment.map((it, i) => (i === idx ? { ...it, ...patch } : it));
+    setEquipment(next);
   };
 
-  const damage = pTxt('Damage (e.g. "2d6" or "Melee + 1d4"), or n/a');
-  const range = pTxt('Range (e.g. "30ft - 60ft" or "Melee range"), or n/a');
-  const weight = pTxt('Weight (light / heavy), or n/a');
-  const durability = pNum('Max Durability (number) or n/a');
-  const ammo = pNum('Max Ammo (number) or n/a');
-  const growthTime = pTxt('Growth time (text) or n/a');
-  const yld = pTxt('Yield (text) or n/a');
-  const useCost = (() => {
-    const v = prompt('Bar usage (number) or n/a');
-    if (!v) return 0;
-    if (String(v).trim().toLowerCase() === 'n/a') return 0;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  })();
-
-  return {
-    name,
-    quantity: 1,
-    isCustom: true,
-    damage,
-    range,
-    weight,
-    growthTime,
-    yield: yld,
-    useCost,
-    maxDurability: durability,
-    currentDurability: durability,
-    maxAmmo: ammo,
-    currentAmmo: ammo,
-  };
-};
-
-const Stat = ({ label, value }) => {
-  if (isBlank(value)) return null;
-  return (
-    <div>
-      <strong>{label}: </strong>{value}
-    </div>
-  );
-};
-
-function Row({ row, onChange, onRemove }) {
-  const catalogOptions = useMemo(() => equipmentList.map((e) => e.name), []);
-  const selectOptions = row.isCustom && row.name && !catalogOptions.includes(row.name)
-    ? [...catalogOptions, row.name]
-    : catalogOptions;
-
-  const update = (patch) => onChange({ ...row, ...patch });
-
-  // Change from dropdown
-  const handleSelect = (e) => {
-    const name = e.target.value;
-    if (!name) return;
-    update(inflateFromCatalog(name));
+  const removeItem = (idx) => {
+    const next = equipment.filter((_, i) => i !== idx);
+    setEquipment(next);
   };
 
-  const qtyChange = (e) => {
-    const q = Math.max(0, Number(e.target.value) || 0);
-    if (q === 0) return onRemove();
-    update({ quantity: q });
-  };
-
-  // Durability / Ammo controls
-  const incDur = (d) => {
-    if (!row.maxDurability) return;
-    let cur = clamp((row.currentDurability || 0) + d, 0, row.maxDurability);
-    let qty = row.quantity;
-    if (cur === 0 && d < 0) {
-      // break one item
-      qty = Math.max(0, qty - 1);
-      if (qty === 0) return onRemove();
-      cur = row.maxDurability; // new one
-    }
-    update({ currentDurability: cur, quantity: qty });
-  };
-
-  const incAmmo = (d) => {
-    if (!row.maxAmmo) return;
-    let cur = clamp((row.currentAmmo || 0) + d, 0, row.maxAmmo);
-    update({ currentAmmo: cur });
-  };
-
-  const reload = () => {
-    if (!row.maxAmmo) return;
-    update({ currentAmmo: row.maxAmmo });
-  };
-
-  return (
-    <div style={{ marginBottom: '1rem' }}>
-      {/* Name selector / label */}
-      {row.isCustom ? (
-        <div style={{ fontWeight: 600 }}>{row.name}</div>
-      ) : (
-        <select value={row.name || ''} onChange={handleSelect}>
-          <option value="">-- Select Item --</option>
-          {selectOptions.map((n) => (
-            <option key={n} value={n}>{n}</option>
-          ))}
-        </select>
-      )}
-
-      {/* Qty */}
-      <span style={{ marginLeft: 10 }}>Qty</span>
-      <input
-        type="number"
-        value={row.quantity || 1}
-        onChange={qtyChange}
-        style={{ width: 60, marginLeft: 6 }}
-      />
-
-      {/* Durability controls (if applicable) */}
-      {row.maxDurability ? (
-        <span style={{ marginLeft: 14 }}>
-          <strong>Durability</strong>{' '}
-          <button onClick={() => incDur(-1)}>-</button>{' '}
-          {row.currentDurability} / {row.maxDurability}{' '}
-          <button onClick={() => incDur(+1)}>+</button>
-        </span>
-      ) : null}
-
-      {/* Ammo controls (if applicable) */}
-      {row.maxAmmo ? (
-        <span style={{ marginLeft: 14 }}>
-          <strong>Ammo</strong>{' '}
-          <button onClick={() => incAmmo(-1)}>-</button>{' '}
-          {row.currentAmmo} / {row.maxAmmo}{' '}
-          <button onClick={() => incAmmo(+1)}>+</button>{' '}
-          <button onClick={reload} style={{ marginLeft: 6 }}>Reload</button>
-        </span>
-      ) : null}
-
-      {/* Stats */}
-      <div style={{ marginTop: 6 }}>
-        <Stat label="Damage" value={row.damage} />
-        <Stat label="Range" value={row.range} />
-        <Stat label="Weight" value={row.weight} />
-        <Stat label="Max Durability" value={row.maxDurability} />
-        <Stat label="Growth time" value={row.growthTime} />
-        <Stat label="Yield" value={row.yield} />
-      </div>
-
-      {!row.isCustom && (
-        <button style={{ marginTop: 6 }} onClick={onRemove}>Remove</button>
-      )}
-    </div>
-  );
-}
-
-export default function EquipmentSheet({ equipment, setEquipment }) {
-  const rows = Array.isArray(equipment) ? equipment : [];
-
-  const addRow = () => {
-    setEquipment([...(rows || []), inflateFromCatalog('')]);
+  const addPremade = () => {
+    setEquipment([
+      ...equipment,
+      // empty slot → user picks from dropdown
+      { name: '', quantity: 1 },
+    ]);
   };
 
   const addCustom = () => {
-    const row = makeCustomRow();
-    if (!row) return;
-    setEquipment([...(rows || []), row]);
+    const name = (prompt('Custom item name?') || '').trim();
+    if (!name) return;
+    // Provide sensible defaults for custom items
+    setEquipment([
+      ...equipment,
+      {
+        name,
+        quantity: 1,
+        custom: true,
+        customDesc: '',
+        weight: 'light',
+        durability: 1,
+        maxDurability: 1,
+      },
+    ]);
   };
 
-  const updateAt = (idx, updated) => {
-    const next = rows.slice();
-    next[idx] = updated;
-    setEquipment(next);
-  };
-
-  const removeAt = (idx) => {
-    const next = rows.slice();
-    next.splice(idx, 1);
-    setEquipment(next);
+  const bumpDurability = (idx, delta) => {
+    const it = equipment[idx] || {};
+    const maxD = Number(it.maxDurability ?? 1);
+    const curD = Number(it.durability ?? maxD);
+    const nextD = Math.min(Math.max(0, curD + delta), maxD);
+    updateItem(idx, { durability: nextD });
   };
 
   return (
-    <div>
-      {rows.map((row, i) => (
-        <Row
-          key={i}
-          row={row}
-          onChange={(u) => updateAt(i, u)}
-          onRemove={() => removeAt(i)}
-        />
-      ))}
+    <div style={{ marginTop: '0.75rem' }}>
+      {(equipment || []).map((it, idx) => {
+        const isCustom = !!it.custom || !!it.customDesc || !byName[it.name];
+        const meta = isCustom ? {} : (byName[it.name] || {});
+        const showDurability =
+          isCustom ||
+          meta.maxDurability != null ||
+          it.maxDurability != null ||
+          it.durability != null;
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={addRow}>+ Add Equipment</button>
+        return (
+          <div key={`eq-${idx}`} style={{ marginBottom: '1.25rem' }}>
+            {/* Header row (premade uses a select; custom shows a label) */}
+            {!isCustom ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <select
+                  value={it.name || ''}
+                  onChange={(e) => updateItem(idx, { name: e.target.value })}
+                >
+                  <option value="">— Select —</option>
+                  {equipmentList.map((e) => (
+                    <option key={e.name} value={e.name}>
+                      {e.name}
+                    </option>
+                  ))}
+                </select>
+                <span>
+                  Qty{' '}
+                  <input
+                    type="number"
+                    min={0}
+                    value={Number(it.quantity ?? 1)}
+                    onChange={(e) => updateItem(idx, { quantity: Number(e.target.value || 0) })}
+                    style={{ width: 60 }}
+                  />
+                </span>
+                <button onClick={() => removeItem(idx)}>Remove</button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <strong>{it.name || 'Custom Item'}</strong>
+                <span>
+                  Qty{' '}
+                  <input
+                    type="number"
+                    min={0}
+                    value={Number(it.quantity ?? 1)}
+                    onChange={(e) => updateItem(idx, { quantity: Number(e.target.value || 0) })}
+                    style={{ width: 60 }}
+                  />
+                </span>
+                {/* NEW: Remove for custom items too */}
+                <button onClick={() => removeItem(idx)}>Remove</button>
+              </div>
+            )}
+
+            {/* Details */}
+            {!isCustom ? (
+              <>
+                {meta.damage && (
+                  <div>
+                    <strong>Damage:</strong> {meta.damage}
+                  </div>
+                )}
+                {meta.range && (
+                  <div>
+                    <strong>Range:</strong> {meta.range}
+                  </div>
+                )}
+                <div>
+                  <strong>Weight:</strong> {meta.weight ?? 'light'}
+                </div>
+                {meta.useCost != null && (
+                  <div>
+                    <strong>Use Cost:</strong> {meta.useCost} Bar
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {it.customDesc ? (
+                  <div style={{ marginTop: 6 }}>
+                    <em>{it.customDesc}</em>
+                  </div>
+                ) : null}
+                <div>
+                  <strong>Weight:</strong> {it.weight ?? 'light'}
+                </div>
+              </>
+            )}
+
+            {/* Durability (if present or custom) */}
+            {showDurability && (
+              <div style={{ marginTop: 6 }}>
+                <strong>Durability</strong>{' '}
+                <button onClick={() => bumpDurability(idx, -1)}>-</button>{' '}
+                {Number(it.durability ?? it.maxDurability ?? 1)} /{' '}
+                {Number(it.maxDurability ?? meta.maxDurability ?? 1)}{' '}
+                <button onClick={() => bumpDurability(idx, +1)}>+</button>
+                {it.maxDurability != null || meta.maxDurability != null ? (
+                  <div style={{ marginTop: 4 }}>
+                    <strong>Max Durability:</strong>{' '}
+                    {Number(it.maxDurability ?? meta.maxDurability ?? 1)}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <button onClick={addPremade}>+ Add Equipment</button>
         <button onClick={addCustom}>+ Add Custom</button>
       </div>
     </div>
