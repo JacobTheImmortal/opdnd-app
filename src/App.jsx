@@ -12,48 +12,44 @@ import Overview from './Overview';
 import DmTools from './DmTools';
 import { getFruitActions } from './devilFruitActions';
 
-// ---------- helpers ----------
+// ---------------- helpers ----------------
 const PIN_DM = '5637';
 
-async function saveCharacter(character) {
-  if (!character || !character.id) return;
-  const { error } = await supabase.from('characters').upsert({ id: character.id, data: character });
-  if (error) console.error('❌ Error saving character:', error);
-}
-
+const deepClone = (o) => JSON.parse(JSON.stringify(o));
 const uniqueBy = (arr, keyFn) => {
   const seen = new Set();
-  return arr.filter((item) => {
-    const k = keyFn(item);
+  return arr.filter((x) => {
+    const k = keyFn(x);
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
   });
 };
-const deepClone = (obj) => JSON.parse(JSON.stringify(obj));
-const modFromScore = (score) => Math.floor((Number(score || 10) - 10) / 2);
+const modFromScore = (s) => Math.floor((Number(s || 10) - 10) / 2);
 
-// Recalc BASE (no DM mods here)
-function recalcBase(char) {
-  const race = races[char.race] || {};
-  const stats = char.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
-  const level = char.level || 1;
+async function saveCharacter(c) {
+  if (!c?.id) return;
+  await supabase.from('characters').upsert({ id: c.id, data: c });
+}
+
+// base-only recalc (no DM mods)
+function recalcBase(c) {
+  const race = races[c.race] || {};
+  const st = c.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+  const lvl = c.level || 1;
   const baseHP = race.hp || 20;
   const baseBar = race.bar || 100;
-  const con = stats.con || 10;
-  const int = stats.int || 10;
-  const wis = stats.wis || 10;
-  const hp = calculateMaxHealth(baseHP, con, level);
-  const bar = calculateMaxBar(baseBar, int, wis, level);
-  const reflex = (race.reflex || 5) + Math.floor((stats.dex || 10) / 5) + Math.floor(level / 3);
+  const hp = calculateMaxHealth(baseHP, st.con || 10, lvl);
+  const bar = calculateMaxBar(baseBar, st.int || 10, st.wis || 10, lvl);
+  const reflex = (race.reflex || 5) + Math.floor((st.dex || 10) / 5) + Math.floor(lvl / 3);
   return { baseHp: hp, baseBar: bar, baseReflex: reflex };
 }
 
-// Apply DM mods to base, clamp to minimums
-function applyDmMods(base, mods) {
-  const hpMod = Number(mods.hpMod || 0);
-  const barMod = Number(mods.barMod || 0);
-  const reflexMod = Number(mods.reflexMod || 0);
+// apply flat DM mods (persist across level changes)
+function applyDmMods(base, c) {
+  const hpMod = Number(c.hpMod || 0);
+  const barMod = Number(c.barMod || 0);
+  const reflexMod = Number(c.reflexMod || 0);
   return {
     hp: Math.max(1, (base.baseHp || 1) + hpMod),
     bar: Math.max(0, (base.baseBar || 0) + barMod),
@@ -62,20 +58,17 @@ function applyDmMods(base, mods) {
 }
 
 export default function App() {
-  // ---- app state ----
-  const [step, setStep] = useState(1); // 0 Overview, 1 Home, 2 Choose Race, 3 DevTools, 4 Sheet
+  // steps: 0 overview, 1 home, 2 race, 3 dm, 4 sheet
+  const [step, setStep] = useState(1);
   const [charList, setCharList] = useState([]);
-  const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
   const [currentChar, setCurrentChar] = useState(null);
+
+  const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
 
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
   const [actionPoints, setActionPoints] = useState(3);
-
-  // actions state (and persistence)
-  const [customActions, setCustomActions] = useState([]); // [{name, barCost}]
-  const [actionCostMods, setActionCostMods] = useState({}); // { [actionName]: number }
 
   const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
   const [activeEffects, setActiveEffects] = useState([]);
@@ -85,82 +78,52 @@ export default function App() {
 
   const initStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
-  // ---- load characters (list) ----
+  // --------- load character list ----------
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase.from('characters').select('*');
-      if (error) return console.error('Failed to fetch characters:', error);
+      if (error) {
+        console.error('Failed to fetch characters:', error);
+        return;
+      }
       const parsed = (data || []).map((row) => row.data);
       setCharList(parsed);
     })();
   }, []);
 
-  // ---- helpers to recalc & persist a character (respecting DM mods) ----
-  const recalcAndPersist = (rawChar) => {
-    const c = deepClone(rawChar);
-    // ensure modifiers exist
+  // --------- central recalc + persist ----------
+  const recalcAndPersist = (raw) => {
+    const c = deepClone(raw || {});
     c.hpMod = Number(c.hpMod || 0);
     c.barMod = Number(c.barMod || 0);
     c.reflexMod = Number(c.reflexMod || 0);
-
-    // ensure action persistence fields exist
-    c.customActions = Array.isArray(c.customActions) ? c.customActions : [];
-    c.actionCostMods = c.actionCostMods && typeof c.actionCostMods === 'object' ? c.actionCostMods : {};
+    if (!Array.isArray(c.customActions)) c.customActions = [];
+    if (!c.actionOverrides || typeof c.actionOverrides !== 'object') c.actionOverrides = {};
 
     const base = recalcBase(c);
-    const withMods = applyDmMods(base, c);
-    c.hp = withMods.hp;
-    c.bar = withMods.bar;
-    c.reflex = withMods.reflex;
+    const totals = applyDmMods(base, c);
+    c.hp = totals.hp;
+    c.bar = totals.bar;
+    c.reflex = totals.reflex;
 
-    // clamp current pools
     c.currentHp = Math.min(Math.max(0, c.currentHp ?? c.hp), c.hp);
     c.currentBar = Math.min(Math.max(0, c.currentBar ?? c.bar), c.bar);
 
     setCurrentChar(c);
-    setCustomActions(c.customActions);
-    setActionCostMods(c.actionCostMods);
     saveCharacter(c);
     return c;
   };
 
-  const loadCharacter = async (id) => {
-    const { data, error } = await supabase.from('characters').select('*').eq('id', id).single();
-    if (error || !data?.data) return console.error('❌ Error loading character:', error);
-    const c = data.data;
-    const full = recalcAndPersist(c);
-    setEquipment(full.equipment?.length ? full.equipment : [{ name: '', quantity: 1, customDesc: '' }]);
-    setActiveEffects(full.activeEffects || []);
-    setActionPoints(3);
-    setScreen('Main');
-    setStep(4);
-  };
-
-  // Home helpers (restore buttons)
-  const enterChar = (char) => loadCharacter(char.id);
-  const deleteCharacter = async (char) => {
-    if (!window.confirm(`Delete ${char.name}? This cannot be undone.`)) return;
-    const { error } = await supabase.from('characters').delete().eq('id', char.id);
-    if (error) {
-      alert('Delete failed.');
-      return;
-    }
-    setCharList((prev) => prev.filter((c) => c.id !== char.id));
-    if (currentChar?.id === char.id) {
-      setCurrentChar(null);
-      setStep(1);
-    }
-  };
-
-  // ---- create flow ----
+  // --------- create flow ----------
   const startCreation = (e) => {
     e.preventDefault();
-    const { name, fruit, passcode } = {
-      name: e.target.name.value.trim(),
-      fruit: e.target.fruit.checked,
-      passcode: e.target.passcode.value.trim(),
-    };
-    if (!name || passcode.length !== 4) return alert('Enter a name and a 4-digit passcode');
+    const name = e.target.name.value.trim();
+    const passcode = e.target.passcode.value.trim();
+    const fruit = e.target.fruit.checked;
+    if (!name || passcode.length !== 4) {
+      alert('Enter a name and a 4-digit passcode');
+      return;
+    }
     setNewChar({ name, passcode, fruit });
     setStep(2);
   };
@@ -172,10 +135,9 @@ export default function App() {
     const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
 
     const base = recalcBase({ race: raceKey, stats, level: 1 });
-    const mods = { hpMod: 0, barMod: 0, reflexMod: 0 }; // start clean
-    const totals = applyDmMods(base, mods);
+    const totals = applyDmMods(base, { hpMod: 0, barMod: 0, reflexMod: 0 });
 
-    const char = {
+    const c = {
       ...newChar,
       id: Date.now().toString(),
       race: raceKey,
@@ -195,67 +157,62 @@ export default function App() {
       skills: [],
       hidden: false,
       meleeText: '1d6',
-      meleeBonus: modFromScore(stats.str || 10),
-
-      // actions persistence
+      meleeBonus: modFromScore(stats.str),
       customActions: [],
-      actionCostMods: {},
+      actionOverrides: {}, // { [actionName]: { mod, deleted } }
     };
-    setCharList((prev) => [...prev, char]);
-    setCurrentChar(char);
+
+    setCharList((prev) => [...prev, c]);
+    setCurrentChar(c);
     setEquipment([]);
     setActiveEffects([]);
-    setCustomActions([]);
-    setActionCostMods({});
     setActionPoints(3);
     setScreen('Main');
     setStep(4);
-    saveCharacter(char);
+    saveCharacter(c);
   };
 
-  // ---- stat increase & level up (respect DM mods) ----
-  const bumpAndPersistFrom = (updated) => {
-    const base = recalcBase(updated);
-    const totals = applyDmMods(base, updated);
-    Object.assign(updated, base, totals);
-    updated.currentHp = Math.min(updated.currentHp ?? totals.hp, totals.hp);
-    updated.currentBar = Math.min(updated.currentBar ?? totals.bar, totals.bar);
-    setCurrentChar(updated);
-    saveCharacter(updated);
+  // --------- stat & level ----------
+  const bumpAndPersistFrom = (c) => {
+    const base = recalcBase(c);
+    const totals = applyDmMods(base, c);
+    Object.assign(c, base, totals);
+    c.currentHp = Math.min(c.currentHp ?? totals.hp, totals.hp);
+    c.currentBar = Math.min(c.currentBar ?? totals.bar, totals.bar);
+    setCurrentChar(c);
+    saveCharacter(c);
   };
 
-  const increaseStat = (stat) => {
+  const increaseStat = (statKey) => {
     if (!currentChar || currentChar.sp <= 0) return;
-    const updated = deepClone(currentChar);
-    updated.stats[stat] = (updated.stats[stat] || 10) + 1;
-    updated.sp--;
-    bumpAndPersistFrom(updated);
+    const c = deepClone(currentChar);
+    c.stats[statKey] = (c.stats[statKey] || 10) + 1;
+    c.sp -= 1;
+    bumpAndPersistFrom(c);
   };
 
   const levelUp = () => {
     if (!currentChar) return;
-    const updated = deepClone(currentChar);
-    updated.level++;
-    updated.sp = (updated.sp || 0) + 3;
-    // full restore on level up
-    const base = recalcBase(updated);
-    const totals = applyDmMods(base, updated);
-    Object.assign(updated, base, totals);
-    updated.currentHp = updated.hp;
-    updated.currentBar = updated.bar;
-    setCurrentChar(updated);
-    saveCharacter(updated);
+    const c = deepClone(currentChar);
+    c.level += 1;
+    c.sp = (c.sp || 0) + 3;
+    const base = recalcBase(c);
+    const totals = applyDmMods(base, c);
+    Object.assign(c, base, totals);
+    c.currentHp = c.hp;
+    c.currentBar = c.bar;
+    setCurrentChar(c);
+    saveCharacter(c);
     setActionPoints(3);
   };
 
-  // ---- equipment & devil fruit -> actions ----
+  // --------- actions building ----------
   const equipmentActions = useMemo(() => {
-    const names = equipment.filter((it) => it && it.name && it.name !== '').map((it) => it.name);
+    const names = equipment.filter((e) => e?.name && e.name !== '').map((e) => e.name);
     const distinct = uniqueBy(names, (n) => n);
     return distinct.map((n) => {
-      const meta = equipmentList.find((e) => e.name === n) || {};
-      const cost = Number(meta.useCost) || 0;
-      return { name: `Use ${n}`, barCost: cost, _kind: 'equipment', itemName: n };
+      const meta = equipmentList.find((x) => x.name === n) || {};
+      return { name: `Use ${n}`, barCost: Number(meta.useCost) || 0, _kind: 'equipment' };
     });
   }, [equipment]);
 
@@ -265,65 +222,89 @@ export default function App() {
     return getFruitActions(fruitName).map((a) => ({
       name: a.name,
       barCost: Number(a.barCost) || 0,
-      _kind: 'devilFruit',
       perTurnCost: Number(a.perTurnCost) || 0,
+      _kind: 'fruit',
     }));
   }, [currentChar]);
 
-  // Merge actions (default + equipment + fruit + custom)
-  const actionsMerged = useMemo(
-    () => [...defaultActions, ...equipmentActions, ...devilFruitActions, ...customActions],
-    [equipmentActions, devilFruitActions, customActions]
+  const baseActions = useMemo(
+    () => [...defaultActions, ...equipmentActions, ...devilFruitActions],
+    [equipmentActions, devilFruitActions]
   );
 
-  // Compute final actions with cost modifiers applied
   const actionsToShow = useMemo(() => {
-    const mods = actionCostMods || {};
-    return actionsMerged.map((a) => {
-      const mod = Number(mods[a.name] || 0);
-      const baseCost = Number(a.barCost || 0);
-      const finalCost = Math.max(0, baseCost + mod);
-      return { ...a, _baseCost: baseCost, _mod: mod, barCost: finalCost };
-    });
-  }, [actionsMerged, actionCostMods]);
+    if (!currentChar) return [];
+    const overrides = currentChar.actionOverrides || {};
+    const custom = (currentChar.customActions || []).map((a) => ({
+      name: a.name,
+      barCost: Number(a.barCost) || 0,
+      _kind: 'custom',
+    }));
 
-  // ---- persistence mirrors for equipment/effects ----
-  const persistEquipment = (updated) => {
-    setEquipment(updated);
-    if (!currentChar) return;
-    const updatedChar = { ...currentChar, equipment: updated };
-    setCurrentChar(updatedChar);
-    saveCharacter(updatedChar);
-  };
-  const persistEffects = (updated) => {
-    setActiveEffects(updated);
-    if (!currentChar) return;
-    const updatedChar = { ...currentChar, activeEffects: updated };
-    setCurrentChar(updatedChar);
-    saveCharacter(updatedChar);
-  };
+    const all = [...baseActions, ...custom];
 
-  // ---- actions persistence helpers ----
-  const persistActionMods = (nextMods) => {
-    setActionCostMods(nextMods);
+    const adjusted = all
+      .map((act) => {
+        const ov = overrides[act.name] || {};
+        if (ov.deleted) return null;
+        const mod = Number(ov.mod || 0);
+        return { ...act, barCost: Math.max(0, (Number(act.barCost) || 0) + mod), _mod: mod };
+      })
+      .filter(Boolean);
+
+    return uniqueBy(adjusted, (a) => a.name);
+  }, [baseActions, currentChar]);
+
+  // --------- mirrors that persist ----------
+  const persistEquipment = (next) => {
+    setEquipment(next);
     if (!currentChar) return;
-    const updated = { ...currentChar, actionCostMods: nextMods };
-    setCurrentChar(updated);
-    saveCharacter(updated);
+    const c = { ...currentChar, equipment: next };
+    setCurrentChar(c);
+    saveCharacter(c);
   };
 
-  const persistCustomActions = (nextCustom) => {
-    setCustomActions(nextCustom);
+  const persistEffects = (next) => {
+    setActiveEffects(next);
     if (!currentChar) return;
-    const updated = { ...currentChar, customActions: nextCustom };
-    setCurrentChar(updated);
-    saveCharacter(updated);
+    const c = { ...currentChar, activeEffects: next };
+    setCurrentChar(c);
+    saveCharacter(c);
   };
 
-  /* ----------------------------------
-     Renders
-  -----------------------------------*/
-  // Overview page
+  // --------- open/delete from HOME (Bug #3) ----------
+  const openFromHome = async (char) => {
+    const pin = prompt(`Enter 4-digit passcode for ${char.name}`);
+    if (pin !== (char.passcode || '')) {
+      alert('Incorrect passcode.');
+      return;
+    }
+    // always fetch fresh to avoid stale data or bypass
+    const { data, error } = await supabase.from('characters').select('*').eq('id', char.id).single();
+    if (error || !data?.data) {
+      alert('Could not load character.');
+      return;
+    }
+    const loaded = data.data;
+    const fixed = recalcAndPersist(loaded);
+    setEquipment(fixed.equipment || []);
+    setActiveEffects(fixed.activeEffects || []);
+    setActionPoints(3);
+    setScreen('Main');
+    setStep(4);
+  };
+
+  const deleteFromHome = async (char) => {
+    if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
+    await supabase.from('characters').delete().eq('id', char.id);
+    setCharList((prev) => prev.filter((c) => c.id !== char.id));
+    if (currentChar?.id === char.id) {
+      setCurrentChar(null);
+      setStep(1);
+    }
+  };
+
+  // --------- render ---------
   if (step === 0) {
     return (
       <div style={{ padding: '1rem' }}>
@@ -334,20 +315,16 @@ export default function App() {
     );
   }
 
-  // DEV TOOLS
   if (step === 3) {
     return (
       <DmTools
         charList={charList}
         setCharList={setCharList}
         onBack={() => setStep(1)}
-        onOpenSheet={(char) => {
-          // ensure mods & actions are respected on open
-          const c = recalcAndPersist(char);
-          setEquipment(c.equipment || []);
-          setActiveEffects(c.activeEffects || []);
-          setCustomActions(c.customActions || []);
-          setActionCostMods(c.actionCostMods || {});
+        onOpenSheet={(c) => {
+          const fixed = recalcAndPersist(c);
+          setEquipment(fixed.equipment || []);
+          setActiveEffects(fixed.activeEffects || []);
           setActionPoints(3);
           setScreen('Main');
           setStep(4);
@@ -356,7 +333,6 @@ export default function App() {
     );
   }
 
-  // Choose race page
   if (step === 2) {
     return (
       <div style={{ padding: '1rem' }}>
@@ -372,11 +348,9 @@ export default function App() {
     );
   }
 
-  // Character sheet
   if (step === 4 && currentChar) {
     return (
       <div style={{ padding: '1rem' }}>
-        {/* Back clears the open session */}
         <button
           onClick={() => {
             setCurrentChar(null);
@@ -392,7 +366,6 @@ export default function App() {
         <p>
           <strong>Race:</strong> {currentChar.race}
         </p>
-
         <p>
           <strong>HP:</strong> {currentChar.currentHp} / {currentChar.hp} | <strong>Bar:</strong> {currentChar.currentBar} / {currentChar.bar} |{' '}
           <strong>Reflex:</strong> {currentChar.reflex} | <strong>Melee:</strong>{' '}
@@ -440,20 +413,18 @@ export default function App() {
             />
             <button
               onClick={() => {
-                const updated = { ...currentChar };
-                updated.currentHp = applyDamage(updated.currentHp, damageAmount);
-                setCurrentChar(updated);
-                saveCharacter(updated);
+                const c = { ...currentChar, currentHp: applyDamage(currentChar.currentHp, damageAmount) };
+                setCurrentChar(c);
+                saveCharacter(c);
               }}
             >
               Take Damage
             </button>
             <button
               onClick={() => {
-                const updated = { ...currentChar };
-                updated.currentHp = applyHeal(updated.currentHp, updated.hp, damageAmount);
-                setCurrentChar(updated);
-                saveCharacter(updated);
+                const c = { ...currentChar, currentHp: applyHeal(currentChar.currentHp, currentChar.hp, damageAmount) };
+                setCurrentChar(c);
+                saveCharacter(c);
               }}
               style={{ marginLeft: '0.5rem' }}
             >
@@ -473,36 +444,33 @@ export default function App() {
             />
             <button
               onClick={() => {
-                const updated = { ...currentChar };
-                updated.currentBar = spendBar(updated.currentBar, barAmount);
-                setCurrentChar(updated);
-                saveCharacter(updated);
+                const c = { ...currentChar, currentBar: spendBar(currentChar.currentBar, barAmount) };
+                setCurrentChar(c);
+                saveCharacter(c);
               }}
             >
               Use Bar
             </button>
             <button
               onClick={() => {
-                const updated = { ...currentChar };
-                updated.currentBar = gainBar(updated.currentBar, updated.bar, barAmount);
-                setCurrentChar(updated);
-                saveCharacter(updated);
+                const c = { ...currentChar, currentBar: gainBar(currentChar.currentBar, currentChar.bar, barAmount) };
+                setCurrentChar(c);
+                saveCharacter(c);
               }}
               style={{ marginLeft: '0.5rem' }}
             >
               Regain Bar
             </button>
 
-            {/* Rest buttons */}
             <div style={{ marginTop: '1rem' }}>
               <button
                 style={{ color: 'crimson', marginRight: '1rem' }}
                 onClick={() => {
-                  const updated = { ...currentChar };
-                  updated.currentHp = Math.min(updated.currentHp + 10, updated.hp);
-                  updated.currentBar = updated.bar;
-                  setCurrentChar(updated);
-                  saveCharacter(updated);
+                  const c = { ...currentChar };
+                  c.currentHp = Math.min(c.currentHp + 10, c.hp);
+                  c.currentBar = c.bar;
+                  setCurrentChar(c);
+                  saveCharacter(c);
                 }}
               >
                 Long Rest
@@ -510,11 +478,11 @@ export default function App() {
               <button
                 style={{ color: 'crimson' }}
                 onClick={() => {
-                  const updated = { ...currentChar };
-                  const bonus = Math.floor(updated.bar * 0.5);
-                  updated.currentBar = Math.min(updated.currentBar + bonus, updated.bar);
-                  setCurrentChar(updated);
-                  saveCharacter(updated);
+                  const c = { ...currentChar };
+                  const bonus = Math.floor(c.bar * 0.5);
+                  c.currentBar = Math.min(c.currentBar + bonus, c.bar);
+                  setCurrentChar(c);
+                  saveCharacter(c);
                 }}
               >
                 Short Rest
@@ -529,29 +497,28 @@ export default function App() {
             <p>Action Points: {actionPoints}</p>
             <button
               onClick={() => {
-                const totalUpkeep = activeEffects.reduce((sum, e) => sum + (Number(e.perTurnCost) || 0), 0);
-                if (currentChar.currentBar < totalUpkeep) {
-                  alert(`Not enough Bar to maintain effects (need ${totalUpkeep}). All effects turned off.`);
+                const upkeep = activeEffects.reduce((s, e) => s + (Number(e.perTurnCost) || 0), 0);
+                if (currentChar.currentBar < upkeep) {
+                  alert(`Not enough Bar to maintain effects (need ${upkeep}). All effects turned off.`);
                   persistEffects([]);
                   setActionPoints(3);
                   return;
                 }
-                const updated = { ...currentChar, currentBar: currentChar.currentBar - totalUpkeep };
-                setCurrentChar(updated);
-                saveCharacter(updated);
+                const c = { ...currentChar, currentBar: currentChar.currentBar - upkeep };
+                setCurrentChar(c);
+                saveCharacter(c);
                 setActionPoints(3);
               }}
             >
               Take Turn
             </button>
 
-            {/* Active on Turn */}
             {activeEffects.length > 0 && (
               <div style={{ marginTop: '0.75rem', padding: '0.5rem', border: '1px dashed #aaa' }}>
                 <strong>Active on Turn</strong>
                 {activeEffects.map((eff, i) => (
                   <div key={`eff-${i}`} style={{ marginTop: '0.25rem' }}>
-                    {eff.name} – {eff.perTurnCost} Bar
+                    {eff.name} — {eff.perTurnCost} Bar
                     <button
                       style={{ marginLeft: '0.5rem' }}
                       onClick={() => {
@@ -566,72 +533,72 @@ export default function App() {
               </div>
             )}
 
-            {/* All actions (with per-action Mod + Use; delete for custom) */}
-            {actionsToShow.map((action, i) => (
-              <div key={`${action.name}-${i}`} style={{ marginTop: '0.5rem' }}>
-                <strong>{action.name}</strong> — Base {action._baseCost} Bar
-                <span style={{ marginLeft: '0.75rem' }}>
-                  Mod&nbsp;
-                  <input
-                    type="number"
-                    value={action._mod}
-                    onChange={(e) => {
-                      const val = Number(e.target.value || 0);
-                      const next = { ...(actionCostMods || {}) };
-                      next[action.name] = val;
-                      persistActionMods(next);
-                    }}
-                    style={{ width: 60 }}
-                  />
-                </span>
-                <span style={{ marginLeft: '0.75rem' }}>
-                  Final: <strong>{action.barCost}</strong> Bar
-                </span>
-                <button
-                  onClick={() => {
-                    const cost = action.barCost || 0;
-                    if (actionPoints <= 0) {
-                      alert('No Action Points left!');
-                      return;
-                    }
-                    if (currentChar.currentBar < cost) {
-                      alert('Not enough Bar!');
-                      return;
-                    }
-                    const updated = { ...currentChar };
-                    updated.currentBar -= cost;
-                    setCurrentChar(updated);
-                    saveCharacter(updated);
-                    setActionPoints((prev) => prev - 1);
-
-                    if (action.perTurnCost && action.perTurnCost > 0) {
-                      const already = activeEffects.some((e) => e.name === action.name);
-                      if (!already) persistEffects([...activeEffects, { name: action.name, perTurnCost: action.perTurnCost }]);
-                    }
-                  }}
-                  style={{ marginLeft: '1rem' }}
-                >
-                  Use
-                </button>
-
-                {/* Delete only for custom actions */}
-                {customActions.some((c) => c.name === action.name) && (
+            {actionsToShow.map((action) => {
+              const ov = currentChar.actionOverrides?.[action.name] || { mod: 0, deleted: false };
+              return (
+                <div key={action.name} style={{ marginTop: '0.5rem' }}>
+                  <strong>{action.name}</strong> — Base {Math.max(0, (action.barCost || 0) - (ov.mod || 0))} Bar
+                  <span style={{ marginLeft: 10 }}>
+                    Mod{' '}
+                    <input
+                      type="number"
+                      value={ov.mod || 0}
+                      onChange={(e) => {
+                        const n = Number(e.target.value || 0);
+                        const c = deepClone(currentChar);
+                        const next = { ...(c.actionOverrides || {}) };
+                        next[action.name] = { ...(next[action.name] || {}), mod: n, deleted: false };
+                        c.actionOverrides = next;
+                        setCurrentChar(c);
+                        saveCharacter(c);
+                      }}
+                      style={{ width: 70 }}
+                    />
+                  </span>
                   <button
-                    style={{ marginLeft: '0.5rem', background: '#fbe9e9', border: '1px solid #e57373' }}
                     onClick={() => {
-                      const next = customActions.filter((c) => c.name !== action.name);
-                      persistCustomActions(next);
-                      // also clean any explicit mod for it
-                      const mods = { ...(actionCostMods || {}) };
-                      delete mods[action.name];
-                      persistActionMods(mods);
+                      const cost = action.barCost || 0; // already includes mod
+                      if (actionPoints <= 0) return alert('No Action Points left!');
+                      if (currentChar.currentBar < cost) return alert('Not enough Bar!');
+                      const c = { ...currentChar, currentBar: currentChar.currentBar - cost };
+                      setCurrentChar(c);
+                      saveCharacter(c);
+                      setActionPoints((p) => p - 1);
+
+                      if (action.perTurnCost && action.perTurnCost > 0) {
+                        const already = activeEffects.some((e) => e.name === action.name);
+                        if (!already) persistEffects([...activeEffects, { name: action.name, perTurnCost: action.perTurnCost }]);
+                      }
                     }}
+                    style={{ marginLeft: '0.75rem' }}
+                  >
+                    Use
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (action._kind === 'custom') {
+                        // remove custom action
+                        const c = deepClone(currentChar);
+                        c.customActions = (c.customActions || []).filter((a) => a.name !== action.name);
+                        setCurrentChar(c);
+                        saveCharacter(c);
+                      } else {
+                        // mark preset/equipment/fruit as deleted in overrides
+                        const c = deepClone(currentChar);
+                        const next = { ...(c.actionOverrides || {}) };
+                        next[action.name] = { ...(next[action.name] || {}), deleted: true };
+                        c.actionOverrides = next;
+                        setCurrentChar(c);
+                        saveCharacter(c);
+                      }
+                    }}
+                    style={{ marginLeft: '0.5rem' }}
                   >
                     Delete
                   </button>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
 
             <h4 style={{ marginTop: '1rem' }}>Add Custom Action</h4>
             <input
@@ -645,19 +612,19 @@ export default function App() {
               placeholder="Bar Cost"
               value={newActionBarCost}
               onChange={(e) => setNewActionBarCost(Number(e.target.value))}
-              style={{ width: '80px', marginRight: '0.5rem' }}
+              style={{ width: 80, marginRight: '0.5rem' }}
             />
             <button
               onClick={() => {
-                const name = (newActionName || '').trim();
+                const name = newActionName.trim();
+                const cost = Number(newActionBarCost || 0);
                 if (!name) return;
-                const baseCost = Number.isFinite(newActionBarCost) ? Number(newActionBarCost) : 0;
-                const next = [...customActions, { name, barCost: baseCost, _kind: 'custom' }];
-                persistCustomActions(next);
-                // start with no mod for new custom action
-                const mods = { ...(actionCostMods || {}) };
-                if (mods[name] == null) mods[name] = 0;
-                persistActionMods(mods);
+                const c = deepClone(currentChar);
+                const list = Array.isArray(c.customActions) ? c.customActions : [];
+                list.push({ name, barCost: cost });
+                c.customActions = uniqueBy(list, (a) => a.name);
+                setCurrentChar(c);
+                saveCharacter(c);
                 setNewActionName('');
                 setNewActionBarCost(0);
               }}
@@ -677,19 +644,14 @@ export default function App() {
                 <div>
                   <strong>Name:</strong> {currentChar.fruit.name}
                 </div>
-                {currentChar.fruit.ability && (
-                  <p style={{ marginTop: '0.5rem' }}>
-                    <em>{currentChar.fruit.ability}</em>
-                  </p>
-                )}
+                {currentChar.fruit.ability && <p style={{ marginTop: '0.5rem' }}><em>{currentChar.fruit.ability}</em></p>}
                 {devilFruitActions.length > 0 && (
                   <div style={{ marginTop: '0.75rem' }}>
                     <strong>Starting Actions</strong>
                     <ul>
-                      {devilFruitActions.map((a, i) => (
-                        <li key={`dfa-${i}`}>
-                          {a.name} – {a.barCost} Bar
-                          {a.perTurnCost ? ` + ${a.perTurnCost}/turn` : ''}
+                      {devilFruitActions.map((a) => (
+                        <li key={a.name}>
+                          {a.name} — {a.barCost} Bar{a.perTurnCost ? ` + ${a.perTurnCost}/turn` : ''}
                         </li>
                       ))}
                     </ul>
@@ -708,14 +670,10 @@ export default function App() {
             <p>Skill Points: {currentChar.sp}</p>
             <button
               onClick={() => {
-                if (currentChar.sp <= 0) {
-                  alert('No Skill Points left.');
-                  return;
-                }
-                const updated = { ...currentChar };
-                updated.sp -= 1;
-                setCurrentChar(updated);
-                saveCharacter(updated);
+                if (currentChar.sp <= 0) return alert('No Skill Points left.');
+                const c = { ...currentChar, sp: currentChar.sp - 1 };
+                setCurrentChar(c);
+                saveCharacter(c);
               }}
             >
               Spend Skill Point
@@ -726,13 +684,13 @@ export default function App() {
                 onClick={() => {
                   const name = prompt('Skill name?');
                   if (!name) return;
-                  const desc = prompt('Skill description?') || '';
-                  const updated = { ...currentChar };
-                  const next = Array.isArray(updated.skills) ? [...updated.skills] : [];
-                  next.push({ name, description: desc });
-                  updated.skills = next;
-                  setCurrentChar(updated);
-                  saveCharacter(updated);
+                  const description = prompt('Skill description?') || '';
+                  const c = deepClone(currentChar);
+                  const next = Array.isArray(c.skills) ? [...c.skills] : [];
+                  next.push({ name, description });
+                  c.skills = next;
+                  setCurrentChar(c);
+                  saveCharacter(c);
                 }}
               >
                 + Add Skill
@@ -742,9 +700,21 @@ export default function App() {
             {Array.isArray(currentChar.skills) && currentChar.skills.length > 0 && (
               <ul style={{ marginTop: '1rem' }}>
                 {currentChar.skills.map((s, i) => (
-                  <li key={`skill-${i}`}>
+                  <li key={`${s.name}-${i}`}>
                     <strong>{s.name}</strong>
                     {s.description ? ` — ${s.description}` : ''}
+                    {/* Bug #1: delete button per skill */}
+                    <button
+                      style={{ marginLeft: '0.5rem' }}
+                      onClick={() => {
+                        const c = deepClone(currentChar);
+                        c.skills = (c.skills || []).filter((_, idx) => idx !== i);
+                        setCurrentChar(c);
+                        saveCharacter(c);
+                      }}
+                    >
+                      Delete
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -755,14 +725,12 @@ export default function App() {
     );
   }
 
-  /* ----------------------------------
-     Home
-  -----------------------------------*/
+  // --------- Home ---------
   return (
     <div style={{ padding: '1rem', position: 'relative', minHeight: '100vh' }}>
       <h1>OPDND</h1>
 
-      {/* Top-right Overview button */}
+      {/* Overview */}
       <div style={{ position: 'fixed', right: '1rem', top: '1rem' }}>
         <button style={{ color: 'crimson' }} onClick={() => setStep(0)}>
           Overview
@@ -771,7 +739,7 @@ export default function App() {
 
       <form onSubmit={startCreation}>
         <input name="name" placeholder="Character Name" required />{' '}
-        <input name="passcode" placeholder="4-digit Passcode" maxLength="4" required />{' '}
+        <input name="passcode" placeholder="4-digit Passcode" maxLength={4} required />{' '}
         <label style={{ marginLeft: '1rem' }}>
           <input type="checkbox" name="fruit" /> Start with Devil Fruit?
         </label>
@@ -786,17 +754,17 @@ export default function App() {
           .filter((c) => !c.hidden)
           .map((char) => (
             <li key={char.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
-              <button onClick={() => enterChar(char)}>
+              <button onClick={() => openFromHome(char)}>
                 {char.name} ({char.race})
               </button>
-              <button onClick={() => deleteCharacter(char)} style={{ background: '#fbe9e9', border: '1px solid #e57373' }}>
+              <button onClick={() => deleteFromHome(char)} style={{ background: '#fbe9e9', border: '1px solid #e57373' }}>
                 Delete
               </button>
             </li>
           ))}
       </ul>
 
-      {/* Bottom-left Dev Tool Mode */}
+      {/* Dev tools entry */}
       <div style={{ position: 'fixed', left: '1rem', bottom: '1rem' }}>
         <button
           style={{ color: 'crimson' }}
