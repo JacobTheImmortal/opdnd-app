@@ -12,7 +12,7 @@ import Overview from './Overview';
 import DmTools from './DmTools';
 import { getFruitActions } from './devilFruitActions';
 
-// ---------------- helpers ----------------
+// ---------- helpers ----------
 const PIN_DM = '5637';
 
 const deepClone = (o) => JSON.parse(JSON.stringify(o));
@@ -32,7 +32,7 @@ async function saveCharacter(c) {
   await supabase.from('characters').upsert({ id: c.id, data: c });
 }
 
-// base-only recalc (no DM mods)
+// BASE only (no DM mods)
 function recalcBase(c) {
   const race = races[c.race] || {};
   const st = c.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
@@ -45,7 +45,7 @@ function recalcBase(c) {
   return { baseHp: hp, baseBar: bar, baseReflex: reflex };
 }
 
-// apply flat DM mods (persist across level changes)
+// apply DM flat modifiers
 function applyDmMods(base, c) {
   const hpMod = Number(c.hpMod || 0);
   const barMod = Number(c.barMod || 0);
@@ -57,22 +57,46 @@ function applyDmMods(base, c) {
   };
 }
 
+// safe int helper
+const toNum = (v, d = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
+// create a stable unique id for custom actions
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+// build a stable key for any action row (per-character)
+function actionKey(act) {
+  switch (act._kind) {
+    case 'equipment':
+      return `eq:${act.itemName}`;
+    case 'fruit':
+      return `fruit:${act.fruitName}:${act.name}`;
+    case 'custom':
+      return `custom:${act.id}`;
+    default:
+      return `core:${act.name}`;
+  }
+}
+
 export default function App() {
-  // steps: 0 overview, 1 home, 2 race, 3 dm, 4 sheet
+  // steps: 0 overview, 1 home, 2 race, 3 DM, 4 sheet
   const [step, setStep] = useState(1);
   const [charList, setCharList] = useState([]);
-  const [currentChar, setCurrentChar] = useState(null);
-
   const [newChar, setNewChar] = useState({ name: '', passcode: '', fruit: false });
+  const [currentChar, setCurrentChar] = useState(null);
 
   const [screen, setScreen] = useState('Main');
   const [damageAmount, setDamageAmount] = useState(0);
   const [barAmount, setBarAmount] = useState(0);
   const [actionPoints, setActionPoints] = useState(3);
 
+  // mirrors that we also persist back into the character
   const [equipment, setEquipment] = useState([{ name: '', quantity: 1, customDesc: '' }]);
   const [activeEffects, setActiveEffects] = useState([]);
 
+  // add-custom-action inputs
   const [newActionName, setNewActionName] = useState('');
   const [newActionBarCost, setNewActionBarCost] = useState(0);
 
@@ -86,7 +110,7 @@ export default function App() {
         console.error('Failed to fetch characters:', error);
         return;
       }
-      const parsed = (data || []).map((row) => row.data);
+      const parsed = (data || []).map((r) => r.data);
       setCharList(parsed);
     })();
   }, []);
@@ -94,9 +118,11 @@ export default function App() {
   // --------- central recalc + persist ----------
   const recalcAndPersist = (raw) => {
     const c = deepClone(raw || {});
-    c.hpMod = Number(c.hpMod || 0);
-    c.barMod = Number(c.barMod || 0);
-    c.reflexMod = Number(c.reflexMod || 0);
+    c.hpMod = toNum(c.hpMod);
+    c.barMod = toNum(c.barMod);
+    c.reflexMod = toNum(c.reflexMod);
+
+    // containers for actions
     if (!Array.isArray(c.customActions)) c.customActions = [];
     if (!c.actionOverrides || typeof c.actionOverrides !== 'object') c.actionOverrides = {};
 
@@ -135,7 +161,7 @@ export default function App() {
     const fruit = newChar.fruit ? devilFruits[Math.floor(Math.random() * devilFruits.length)] : null;
 
     const base = recalcBase({ race: raceKey, stats, level: 1 });
-    const totals = applyDmMods(base, { hpMod: 0, barMod: 0, reflexMod: 0 });
+    const totals = applyDmMods(base, {});
 
     const c = {
       ...newChar,
@@ -158,8 +184,8 @@ export default function App() {
       hidden: false,
       meleeText: '1d6',
       meleeBonus: modFromScore(stats.str),
-      customActions: [],
-      actionOverrides: {}, // { [actionName]: { mod, deleted } }
+      customActions: [], // [{id, name, barCost}]
+      actionOverrides: {}, // { [key]: {mod, deleted} }
     };
 
     setCharList((prev) => [...prev, c]);
@@ -172,114 +198,13 @@ export default function App() {
     saveCharacter(c);
   };
 
-  // --------- stat & level ----------
-  const bumpAndPersistFrom = (c) => {
-    const base = recalcBase(c);
-    const totals = applyDmMods(base, c);
-    Object.assign(c, base, totals);
-    c.currentHp = Math.min(c.currentHp ?? totals.hp, totals.hp);
-    c.currentBar = Math.min(c.currentBar ?? totals.bar, totals.bar);
-    setCurrentChar(c);
-    saveCharacter(c);
-  };
-
-  const increaseStat = (statKey) => {
-    if (!currentChar || currentChar.sp <= 0) return;
-    const c = deepClone(currentChar);
-    c.stats[statKey] = (c.stats[statKey] || 10) + 1;
-    c.sp -= 1;
-    bumpAndPersistFrom(c);
-  };
-
-  const levelUp = () => {
-    if (!currentChar) return;
-    const c = deepClone(currentChar);
-    c.level += 1;
-    c.sp = (c.sp || 0) + 3;
-    const base = recalcBase(c);
-    const totals = applyDmMods(base, c);
-    Object.assign(c, base, totals);
-    c.currentHp = c.hp;
-    c.currentBar = c.bar;
-    setCurrentChar(c);
-    saveCharacter(c);
-    setActionPoints(3);
-  };
-
-  // --------- actions building ----------
-  const equipmentActions = useMemo(() => {
-    const names = equipment.filter((e) => e?.name && e.name !== '').map((e) => e.name);
-    const distinct = uniqueBy(names, (n) => n);
-    return distinct.map((n) => {
-      const meta = equipmentList.find((x) => x.name === n) || {};
-      return { name: `Use ${n}`, barCost: Number(meta.useCost) || 0, _kind: 'equipment' };
-    });
-  }, [equipment]);
-
-  const devilFruitActions = useMemo(() => {
-    const fruitName = currentChar?.fruit?.name || '';
-    if (!fruitName) return [];
-    return getFruitActions(fruitName).map((a) => ({
-      name: a.name,
-      barCost: Number(a.barCost) || 0,
-      perTurnCost: Number(a.perTurnCost) || 0,
-      _kind: 'fruit',
-    }));
-  }, [currentChar]);
-
-  const baseActions = useMemo(
-    () => [...defaultActions, ...equipmentActions, ...devilFruitActions],
-    [equipmentActions, devilFruitActions]
-  );
-
-  const actionsToShow = useMemo(() => {
-    if (!currentChar) return [];
-    const overrides = currentChar.actionOverrides || {};
-    const custom = (currentChar.customActions || []).map((a) => ({
-      name: a.name,
-      barCost: Number(a.barCost) || 0,
-      _kind: 'custom',
-    }));
-
-    const all = [...baseActions, ...custom];
-
-    const adjusted = all
-      .map((act) => {
-        const ov = overrides[act.name] || {};
-        if (ov.deleted) return null;
-        const mod = Number(ov.mod || 0);
-        return { ...act, barCost: Math.max(0, (Number(act.barCost) || 0) + mod), _mod: mod };
-      })
-      .filter(Boolean);
-
-    return uniqueBy(adjusted, (a) => a.name);
-  }, [baseActions, currentChar]);
-
-  // --------- mirrors that persist ----------
-  const persistEquipment = (next) => {
-    setEquipment(next);
-    if (!currentChar) return;
-    const c = { ...currentChar, equipment: next };
-    setCurrentChar(c);
-    saveCharacter(c);
-  };
-
-  const persistEffects = (next) => {
-    setActiveEffects(next);
-    if (!currentChar) return;
-    const c = { ...currentChar, activeEffects: next };
-    setCurrentChar(c);
-    saveCharacter(c);
-  };
-
-  // --------- open/delete from HOME (Bug #3) ----------
+  // --------- open/delete from HOME (PIN gate kept) ----------
   const openFromHome = async (char) => {
     const pin = prompt(`Enter 4-digit passcode for ${char.name}`);
     if (pin !== (char.passcode || '')) {
       alert('Incorrect passcode.');
       return;
     }
-    // always fetch fresh to avoid stale data or bypass
     const { data, error } = await supabase.from('characters').select('*').eq('id', char.id).single();
     if (error || !data?.data) {
       alert('Could not load character.');
@@ -301,6 +226,168 @@ export default function App() {
     if (currentChar?.id === char.id) {
       setCurrentChar(null);
       setStep(1);
+    }
+  };
+
+  // --------- stat & level ----------
+  const increaseStat = (statKey) => {
+    if (!currentChar || currentChar.sp <= 0) return;
+    const c = deepClone(currentChar);
+    c.stats[statKey] = (c.stats[statKey] || 10) + 1;
+    c.sp -= 1;
+    const base = recalcBase(c);
+    const totals = applyDmMods(base, c);
+    Object.assign(c, base, totals);
+    c.currentHp = Math.min(c.currentHp, c.hp);
+    c.currentBar = Math.min(c.currentBar, c.bar);
+    setCurrentChar(c);
+    saveCharacter(c);
+  };
+
+  const levelUp = () => {
+    if (!currentChar) return;
+    const c = deepClone(currentChar);
+    c.level += 1;
+    c.sp += 3;
+    const base = recalcBase(c);
+    const totals = applyDmMods(base, c);
+    Object.assign(c, base, totals);
+    c.currentHp = c.hp;
+    c.currentBar = c.bar;
+    setCurrentChar(c);
+    saveCharacter(c);
+    setActionPoints(3);
+  };
+
+  // --------- action sources (equipment/devil fruit/default/custom) ----------
+  const equipmentActions = useMemo(() => {
+    const names = equipment.filter((e) => e && e.name && e.name !== '').map((e) => e.name);
+    const distinct = uniqueBy(names, (n) => n);
+    return distinct.map((n) => {
+      const meta = equipmentList.find((x) => x.name === n) || {};
+      return { name: `Use ${n}`, baseCost: toNum(meta.useCost), _kind: 'equipment', itemName: n };
+    });
+  }, [equipment]);
+
+  const devilFruitActions = useMemo(() => {
+    const fruitName = currentChar?.fruit?.name || '';
+    if (!fruitName) return [];
+    return getFruitActions(fruitName).map((a) => ({
+      name: a.name,
+      baseCost: toNum(a.barCost),
+      perTurnCost: toNum(a.perTurnCost),
+      _kind: 'fruit',
+      fruitName,
+    }));
+  }, [currentChar]);
+
+  const coreActions = useMemo(
+    () => defaultActions.map((a) => ({ name: a.name, baseCost: toNum(a.barCost), _kind: 'core' })),
+    []
+  );
+
+  // ensure custom actions have ids
+  const ensureCustomIds = (c) => {
+    const next = (c.customActions || []).map((a) => (a.id ? a : { ...a, id: uid() }));
+    if (next.length !== (c.customActions || []).length) {
+      const nc = { ...c, customActions: next };
+      setCurrentChar(nc);
+      saveCharacter(nc);
+      return next;
+    }
+    return c.customActions || [];
+  };
+
+  const customActions = useMemo(() => {
+    if (!currentChar) return [];
+    return ensureCustomIds(currentChar).map((a) => ({
+      id: a.id,
+      name: a.name,
+      baseCost: toNum(a.barCost),
+      _kind: 'custom',
+    }));
+  }, [currentChar]);
+
+  // Combine and apply per-action overrides (mod & deleted)
+  const actionsToShow = useMemo(() => {
+    if (!currentChar) return [];
+    const overrides = currentChar.actionOverrides || {};
+    const combined = [...coreActions, ...equipmentActions, ...devilFruitActions, ...customActions].map((act) => {
+      const key = actionKey(act);
+      const ov = overrides[key] || {};
+      if (ov.deleted) return null;
+      const mod = toNum(ov.mod);
+      return {
+        ...act,
+        key,
+        mod,
+        cost: Math.max(0, toNum(act.baseCost) + mod),
+      };
+    });
+    return combined.filter(Boolean);
+  }, [currentChar, coreActions, equipmentActions, devilFruitActions, customActions]);
+
+  // --------- persistence mirrors ----------
+  const persistEquipment = (next) => {
+    setEquipment(next);
+    if (!currentChar) return;
+    const c = { ...currentChar, equipment: next };
+    setCurrentChar(c);
+    saveCharacter(c);
+  };
+  const persistEffects = (next) => {
+    setActiveEffects(next);
+    if (!currentChar) return;
+    const c = { ...currentChar, activeEffects: next };
+    setCurrentChar(c);
+    saveCharacter(c);
+  };
+
+  // --------- UI helpers for actions ----------
+  const updateMod = (key, value) => {
+    if (!currentChar) return;
+    const c = deepClone(currentChar);
+    const map = { ...(c.actionOverrides || {}) };
+    map[key] = { ...(map[key] || {}), mod: toNum(value), deleted: false };
+    c.actionOverrides = map;
+    setCurrentChar(c);
+    saveCharacter(c);
+  };
+
+  const deleteAction = (act) => {
+    if (!currentChar) return;
+    const key = actionKey(act);
+    const c = deepClone(currentChar);
+
+    if (act._kind === 'custom') {
+      // remove from customActions by id and cleanup override entry
+      c.customActions = (c.customActions || []).filter((x) => x.id !== act.id);
+      if (c.actionOverrides && c.actionOverrides[key]) {
+        const map = { ...c.actionOverrides };
+        delete map[key];
+        c.actionOverrides = map;
+      }
+    } else {
+      const map = { ...(c.actionOverrides || {}) };
+      map[key] = { ...(map[key] || {}), deleted: true };
+      c.actionOverrides = map;
+    }
+
+    setCurrentChar(c);
+    saveCharacter(c);
+  };
+
+  const useAction = (act) => {
+    if (actionPoints <= 0) return alert('No Action Points left!');
+    if (currentChar.currentBar < act.cost) return alert('Not enough Bar!');
+    const c = { ...currentChar, currentBar: currentChar.currentBar - act.cost };
+    setCurrentChar(c);
+    saveCharacter(c);
+    setActionPoints((p) => p - 1);
+
+    if (toNum(act.perTurnCost) > 0) {
+      const already = activeEffects.some((e) => e.name === act.name);
+      if (!already) persistEffects([...activeEffects, { name: act.name, perTurnCost: act.perTurnCost }]);
     }
   };
 
@@ -407,7 +494,7 @@ export default function App() {
             <input
               type="number"
               value={damageAmount}
-              onChange={(e) => setDamageAmount(Number(e.target.value))}
+              onChange={(e) => setDamageAmount(toNum(e.target.value))}
               placeholder="Amount"
               style={{ width: '60px' }}
             />
@@ -438,7 +525,7 @@ export default function App() {
             <input
               type="number"
               value={barAmount}
-              onChange={(e) => setBarAmount(Number(e.target.value))}
+              onChange={(e) => setBarAmount(toNum(e.target.value))}
               placeholder="Amount"
               style={{ width: '60px' }}
             />
@@ -497,7 +584,7 @@ export default function App() {
             <p>Action Points: {actionPoints}</p>
             <button
               onClick={() => {
-                const upkeep = activeEffects.reduce((s, e) => s + (Number(e.perTurnCost) || 0), 0);
+                const upkeep = activeEffects.reduce((s, e) => s + toNum(e.perTurnCost), 0);
                 if (currentChar.currentBar < upkeep) {
                   alert(`Not enough Bar to maintain effects (need ${upkeep}). All effects turned off.`);
                   persistEffects([]);
@@ -533,73 +620,29 @@ export default function App() {
               </div>
             )}
 
-            {actionsToShow.map((action) => {
-              const ov = currentChar.actionOverrides?.[action.name] || { mod: 0, deleted: false };
-              return (
-                <div key={action.name} style={{ marginTop: '0.5rem' }}>
-                  <strong>{action.name}</strong> — Base {Math.max(0, (action.barCost || 0) - (ov.mod || 0))} Bar
-                  <span style={{ marginLeft: 10 }}>
-                    Mod{' '}
-                    <input
-                      type="number"
-                      value={ov.mod || 0}
-                      onChange={(e) => {
-                        const n = Number(e.target.value || 0);
-                        const c = deepClone(currentChar);
-                        const next = { ...(c.actionOverrides || {}) };
-                        next[action.name] = { ...(next[action.name] || {}), mod: n, deleted: false };
-                        c.actionOverrides = next;
-                        setCurrentChar(c);
-                        saveCharacter(c);
-                      }}
-                      style={{ width: 70 }}
-                    />
-                  </span>
-                  <button
-                    onClick={() => {
-                      const cost = action.barCost || 0; // already includes mod
-                      if (actionPoints <= 0) return alert('No Action Points left!');
-                      if (currentChar.currentBar < cost) return alert('Not enough Bar!');
-                      const c = { ...currentChar, currentBar: currentChar.currentBar - cost };
-                      setCurrentChar(c);
-                      saveCharacter(c);
-                      setActionPoints((p) => p - 1);
+            {/* list all actions with Mod + Use + Delete, no "Final:" text */}
+            {actionsToShow.map((act) => (
+              <div key={act.key} style={{ marginTop: '0.5rem' }}>
+                <strong>{act.name}</strong> — Base {toNum(act.baseCost)} Bar
+                <span style={{ marginLeft: 10 }}>
+                  Mod{' '}
+                  <input
+                    type="number"
+                    value={act.mod || 0}
+                    onChange={(e) => updateMod(act.key, e.target.value)}
+                    style={{ width: 70 }}
+                  />
+                </span>
+                <button onClick={() => useAction(act)} style={{ marginLeft: '0.75rem' }}>
+                  Use
+                </button>
+                <button onClick={() => deleteAction(act)} style={{ marginLeft: '0.5rem' }}>
+                  Delete
+                </button>
+              </div>
+            ))}
 
-                      if (action.perTurnCost && action.perTurnCost > 0) {
-                        const already = activeEffects.some((e) => e.name === action.name);
-                        if (!already) persistEffects([...activeEffects, { name: action.name, perTurnCost: action.perTurnCost }]);
-                      }
-                    }}
-                    style={{ marginLeft: '0.75rem' }}
-                  >
-                    Use
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (action._kind === 'custom') {
-                        // remove custom action
-                        const c = deepClone(currentChar);
-                        c.customActions = (c.customActions || []).filter((a) => a.name !== action.name);
-                        setCurrentChar(c);
-                        saveCharacter(c);
-                      } else {
-                        // mark preset/equipment/fruit as deleted in overrides
-                        const c = deepClone(currentChar);
-                        const next = { ...(c.actionOverrides || {}) };
-                        next[action.name] = { ...(next[action.name] || {}), deleted: true };
-                        c.actionOverrides = next;
-                        setCurrentChar(c);
-                        saveCharacter(c);
-                      }
-                    }}
-                    style={{ marginLeft: '0.5rem' }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              );
-            })}
-
+            {/* Add custom action */}
             <h4 style={{ marginTop: '1rem' }}>Add Custom Action</h4>
             <input
               placeholder="Action Name"
@@ -611,18 +654,18 @@ export default function App() {
               type="number"
               placeholder="Bar Cost"
               value={newActionBarCost}
-              onChange={(e) => setNewActionBarCost(Number(e.target.value))}
+              onChange={(e) => setNewActionBarCost(toNum(e.target.value))}
               style={{ width: 80, marginRight: '0.5rem' }}
             />
             <button
               onClick={() => {
                 const name = newActionName.trim();
-                const cost = Number(newActionBarCost || 0);
+                const cost = toNum(newActionBarCost);
                 if (!name) return;
                 const c = deepClone(currentChar);
-                const list = Array.isArray(c.customActions) ? c.customActions : [];
-                list.push({ name, barCost: cost });
-                c.customActions = uniqueBy(list, (a) => a.name);
+                const list = Array.isArray(c.customActions) ? [...c.customActions] : [];
+                list.push({ id: uid(), name, barCost: cost });
+                c.customActions = list;
                 setCurrentChar(c);
                 saveCharacter(c);
                 setNewActionName('');
@@ -644,14 +687,13 @@ export default function App() {
                 <div>
                   <strong>Name:</strong> {currentChar.fruit.name}
                 </div>
-                {currentChar.fruit.ability && <p style={{ marginTop: '0.5rem' }}><em>{currentChar.fruit.ability}</em></p>}
                 {devilFruitActions.length > 0 && (
                   <div style={{ marginTop: '0.75rem' }}>
                     <strong>Starting Actions</strong>
                     <ul>
                       {devilFruitActions.map((a) => (
-                        <li key={a.name}>
-                          {a.name} — {a.barCost} Bar{a.perTurnCost ? ` + ${a.perTurnCost}/turn` : ''}
+                        <li key={`${a.fruitName}:${a.name}`}>
+                          {a.name} — {a.baseCost} Bar{a.perTurnCost ? ` + ${a.perTurnCost}/turn` : ''}
                         </li>
                       ))}
                     </ul>
@@ -703,7 +745,6 @@ export default function App() {
                   <li key={`${s.name}-${i}`}>
                     <strong>{s.name}</strong>
                     {s.description ? ` — ${s.description}` : ''}
-                    {/* Bug #1: delete button per skill */}
                     <button
                       style={{ marginLeft: '0.5rem' }}
                       onClick={() => {
@@ -764,7 +805,6 @@ export default function App() {
           ))}
       </ul>
 
-      {/* Dev tools entry */}
       <div style={{ position: 'fixed', left: '1rem', bottom: '1rem' }}>
         <button
           style={{ color: 'crimson' }}
